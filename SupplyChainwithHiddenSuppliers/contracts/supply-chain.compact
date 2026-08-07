@@ -1,0 +1,181 @@
+pragma language_version >= 0.23;
+
+import CompactStandardLibrary;
+
+// ════════════════════════════════════════════════════════════════════════════
+//  Supply Chain with Hidden Suppliers
+//
+//  What the company proves WITHOUT revealing its commercial secrets:
+//    • every product is ethically sourced
+//    • every supplier behind a product is certified
+//    • every logistics route is compliant
+//    • every supplier is paid at least a public fair-trade floor
+//
+//  ── PUBLIC ledger state (visible to every on-chain observer) ────────────────
+//    products : Map<productId, ProductRecord>
+//        productId          the public product/SKU identifier
+//        isEthical          PROVEN claim — ethically sourced
+//        allCertified       PROVEN claim — every supplier certified
+//        certifiedCount     aggregate number of certified suppliers (count only)
+//        allRoutesCompliant PROVEN claim — every logistics route compliant
+//        fairFloor          public minimum unit price committed by the company
+//        fairPricing        PROVEN claim — every price ≥ fairFloor
+//        auditCount         how many times the claims were re-verified on-chain
+//    authority   : Bytes<32>  public key of the owning company (set at deploy)
+//
+//  ── PRIVATE witness data (proved in zero-knowledge, NEVER on chain) ────────
+//    suppliers : Vector<8, Supplier> — one entry per supply-chain slot
+//        identityHash   hash binding the supplier to a real-world identity
+//        isCertified    whether the supplier currently holds a valid cert
+//        isEthical      whether the supplier meets ethical-sourcing rules
+//        certExpiry     the supplier certificate's expiry (policy-checked)
+//        pricePaid      the unit price actually paid to the supplier
+//        routeCompliant whether the logistics route is within approved corridors
+//
+//  Disclosure policy (why disclose() sits exactly where it does):
+//    • productId, the claim booleans, the certified count and the committed
+//      fairFloor are the ONLY witness-derived values that cross the public
+//      boundary. Each is wrapped in disclose() at the point of use.
+//    • Supplier identities, certificate numbers, prices and routes are never
+//      disclosed: they exist only inside the wallet while a proof is being
+//      generated and are dropped immediately afterwards.
+//
+//  The authority-secret witness proves ownership of privileged actions without
+//  ever revealing the private key on chain.
+// ════════════════════════════════════════════════════════════════════════════
+
+/// A single supply-chain participant (a tier-1 supplier) as held by the
+/// company's private sourcing system. Every field is private witness data.
+struct Supplier {
+  identityHash: Bytes<32>;
+  isCertified: Boolean;
+  isEthical: Boolean;
+  certExpiry: Uint<64>;
+  pricePaid: Uint<64>;
+  routeCompliant: Boolean;
+}
+
+/// Public on-chain record of a product's certification claims.
+struct ProductRecord {
+  isEthical: Boolean;
+  allCertified: Boolean;
+  certifiedCount: Uint<8>;
+  allRoutesCompliant: Boolean;
+  fairFloor: Uint<64>;
+  fairPricing: Boolean;
+  auditCount: Uint<64>;
+}
+
+/// A product references up to 8 suppliers (bounded at compile time).
+type Suppliers = Vector<8, Supplier>;
+
+/// Public registry of products and their certification claims.
+export ledger products: Map<Opaque<"string">, ProductRecord>;
+
+/// Public key of the company authorised to withdraw claims. Set once at
+/// deployment from the constructor's private-key argument, then sealed.
+export sealed ledger authority: Bytes<32>;
+
+/// Derives the DApp-scoped public key for a company private key. The
+/// derivation uses a domain-separated hash so the key cannot be linked to
+/// the wallet's on-chain identity.
+circuit publicKey(sk: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<2, Bytes<32>>>([
+    pad(32, "supply-chain:company:pk"),
+    sk,
+  ]);
+}
+
+/// The company's private signing key. Provided by the wallet at proof time
+/// and used ONLY to build the ownership proof for privileged actions. It is
+/// never disclosed anywhere.
+witness companySecretKey(): Bytes<32>;
+
+/// Constructor: bind the company authority to a private key held off-chain.
+/// The derived public key is deliberately disclosed; the private key is not.
+constructor(ownerSk: Bytes<32>) {
+  authority = disclose(publicKey(ownerSk));
+}
+
+// ── Circuit 1 · registerProduct ──────────────────────────────────────────────
+// Proves a product's sourcing claims from the private supplier list and
+// publishes them. Supplier identities, individual certificates, prices and
+// routes stay private — only the claims and the aggregate count go on chain.
+export circuit registerProduct(productId: Opaque<"string">, suppliers: Suppliers): [] {
+  assert(!products.member(disclose(productId)), "Product already registered");
+  const certified = fold((acc: Boolean, s: Supplier): Boolean => acc && s.isCertified, true, suppliers);
+  const ethical = fold((acc: Boolean, s: Supplier): Boolean => acc && s.isEthical, true, suppliers);
+  const routes = fold((acc: Boolean, s: Supplier): Boolean => acc && s.routeCompliant, true, suppliers);
+  const count = fold((acc: Field, s: Supplier): Field => acc + (s.isCertified ? 1 : 0), (0 as Field), suppliers);
+  assert(certified, "Not all suppliers are certified");
+  assert(ethical, "Not all suppliers meet ethical sourcing rules");
+  assert(routes, "Not all logistics routes are compliant");
+  products.insert(disclose(productId), ProductRecord {
+    isEthical: disclose(ethical),
+    allCertified: disclose(certified),
+    certifiedCount: disclose(count as Uint<8>),
+    allRoutesCompliant: disclose(routes),
+    fairFloor: 0,
+    fairPricing: false,
+    auditCount: 0,
+  });
+}
+
+// ── Circuit 2 · recertifyProduct ─────────────────────────────────────────────
+// Periodic re-audit of a registered product. Re-proves the same claims from a
+// fresh private supplier list, enforces the company policy that no certificate
+// expires before the disclosed minExpiry threshold, and increments the public
+// audit counter. The supplier list itself stays private.
+export circuit recertifyProduct(productId: Opaque<"string">, minExpiry: Uint<64>, suppliers: Suppliers): [] {
+  assert(products.member(disclose(productId)), "Product is not registered");
+  const certified = fold((acc: Boolean, s: Supplier): Boolean => acc && s.isCertified, true, suppliers);
+  const ethical = fold((acc: Boolean, s: Supplier): Boolean => acc && s.isEthical, true, suppliers);
+  const routes = fold((acc: Boolean, s: Supplier): Boolean => acc && s.routeCompliant, true, suppliers);
+  const count = fold((acc: Field, s: Supplier): Field => acc + (s.isCertified ? 1 : 0), (0 as Field), suppliers);
+  const notExpired = fold((acc: Boolean, s: Supplier): Boolean => acc && s.certExpiry >= minExpiry, true, suppliers);
+  assert(certified, "Not all suppliers are certified");
+  assert(ethical, "Not all suppliers meet ethical sourcing rules");
+  assert(routes, "Not all logistics routes are compliant");
+  assert(notExpired, "A supplier certificate expires before the policy threshold");
+  const record = products.lookup(disclose(productId));
+  products.insert(disclose(productId), ProductRecord {
+    isEthical: disclose(ethical),
+    allCertified: disclose(certified),
+    certifiedCount: disclose(count as Uint<8>),
+    allRoutesCompliant: disclose(routes),
+    fairFloor: record.fairFloor,
+    fairPricing: record.fairPricing,
+    auditCount: (record.auditCount + 1) as Uint<64>,
+  });
+}
+
+// ── Circuit 3 · proveFairPricing ─────────────────────────────────────────────
+// Proves that the price actually paid to EVERY supplier is at least the
+// publicly committed fair-trade floor. The company publishes the floor and
+// the "fairPricing" claim; the individual prices never leave the wallet.
+export circuit proveFairPricing(productId: Opaque<"string">, fairFloor: Uint<64>, suppliers: Suppliers): [] {
+  assert(products.member(disclose(productId)), "Product is not registered");
+  const fair = fold((acc: Boolean, s: Supplier): Boolean => acc && s.pricePaid >= fairFloor, true, suppliers);
+  assert(fair, "Not every supplier is paid at least the fair-trade floor");
+  const record = products.lookup(disclose(productId));
+  products.insert(disclose(productId), ProductRecord {
+    isEthical: record.isEthical,
+    allCertified: record.allCertified,
+    certifiedCount: record.certifiedCount,
+    allRoutesCompliant: record.allRoutesCompliant,
+    fairFloor: disclose(fairFloor),
+    fairPricing: disclose(fair),
+    auditCount: record.auditCount,
+  });
+}
+
+// ── Circuit 4 · withdrawClaim ────────────────────────────────────────────────
+// Lets the owning company retract a certification claim. Ownership is proven
+// in zero-knowledge from the private companySecretKey witness — the key never
+// appears on chain, only the derived public key does.
+export circuit withdrawClaim(productId: Opaque<"string">): [] {
+  const sk = companySecretKey();
+  assert(publicKey(sk) == authority, "Only the company can withdraw a claim");
+  assert(products.member(disclose(productId)), "Product is not registered");
+  products.remove(disclose(productId));
+}
