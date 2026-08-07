@@ -1,12 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import {
-  fetchPublicState,
-  getConfig,
-  CLAIM_LABELS,
-  STAGES,
-  type ProductClaim,
-  type PublicLedger,
-} from './api';
+import { fetchPublicState, CLAIM_LABELS, STAGES, type ProductClaim, type PublicLedger } from './api';
+import { getConfig, networkLabel } from './lib/networks';
+import { useMidnight } from './hooks/useMidnight';
+import { WalletConnect } from './components/WalletConnect';
+import { ProveActions } from './components/ProveActions';
 
 type LoadState =
   | { status: 'loading' }
@@ -14,13 +11,12 @@ type LoadState =
   | { status: 'empty' }
   | { status: 'error'; message: string };
 
-const BOOL_LABEL: Record<string, string> = { true: '✔', false: '✖' };
+const BOOL: Record<string, string> = { true: '✔', false: '✖' };
 
 function ClaimBadge({ ok }: { ok: boolean }) {
-  return <span className={`badge ${ok ? 'badge-ok' : 'badge-no'}`}>{BOOL_LABEL[String(ok)]}</span>;
+  return <span className={`badge ${ok ? 'badge-ok' : 'badge-no'}`}>{BOOL[String(ok)]}</span>;
 }
 
-/** Lifecycle progress bar: MANUFACTURED (1) → IN_TRANSIT (2) → DELIVERED (3). */
 function StageBar({ stage }: { stage: number }) {
   const steps = [1, 2, 3] as const;
   return (
@@ -53,9 +49,7 @@ function ProductRow({ product }: { product: ProductClaim }) {
     <div className="product-card">
       <div className="product-header">
         <span className="product-id">{product.productId}</span>
-        <span className="audits">
-          re-audits on chain: {product.auditCount}
-        </span>
+        <span className="audits">re-audits on chain: {product.auditCount}</span>
       </div>
       <div className="product-meta">
         <span className="muted">batch:</span> <code>{product.batchId}</code>
@@ -64,19 +58,13 @@ function ProductRow({ product }: { product: ProductClaim }) {
       <StageBar stage={product.stage} />
       <ScoreBar score={product.complianceScore} />
       <div className="product-claims">
-        <div className="claim">
-          <ClaimBadge ok={product.isEthical} />
-          <span>{CLAIM_LABELS.isEthical}</span>
-        </div>
+        <div className="claim"><ClaimBadge ok={product.isEthical} /><span>{CLAIM_LABELS.isEthical}</span></div>
         <div className="claim">
           <ClaimBadge ok={product.allCertified} />
           <span>{CLAIM_LABELS.allCertified}</span>
           <span className="muted">({product.certifiedCount} of 8 suppliers certified — count only, identities never revealed)</span>
         </div>
-        <div className="claim">
-          <ClaimBadge ok={product.allRoutesCompliant} />
-          <span>{CLAIM_LABELS.allRoutesCompliant}</span>
-        </div>
+        <div className="claim"><ClaimBadge ok={product.allRoutesCompliant} /><span>{CLAIM_LABELS.allRoutesCompliant}</span></div>
         <div className="claim">
           <ClaimBadge ok={product.fairPricing} />
           <span>{CLAIM_LABELS.fairPricing}</span>
@@ -105,91 +93,66 @@ function Stats({ products }: { products: ProductClaim[] }) {
 }
 
 export default function App() {
-  const config = getConfig();
+  const netConfig = getConfig();
+  const wallet = useMidnight();
+
   const [load, setLoad] = useState<LoadState>({ status: 'loading' });
-  const [address, setAddress] = useState(config.contractAddress);
+  const [address, setAddress] = useState(netConfig.contractAddress);
   const [refreshKey, setRefreshKey] = useState(0);
 
   const loadState = useCallback(async () => {
-    if (!address.trim()) {
-      setLoad({ status: 'empty' });
-      return;
-    }
+    if (!address.trim()) { setLoad({ status: 'empty' }); return; }
     setLoad({ status: 'loading' });
     try {
-      const ledger = await fetchPublicState(config.indexerUrl, address.trim());
+      const ledger = await fetchPublicState(netConfig.indexerUrl, address.trim());
       setLoad(ledger ? { status: 'ready', ledger } : { status: 'empty' });
     } catch (err) {
       setLoad({ status: 'error', message: err instanceof Error ? err.message : String(err) });
     }
-  }, [address, config.indexerUrl]);
+  }, [address, netConfig.indexerUrl]);
 
-  useEffect(() => {
-    void loadState();
-  }, [loadState, refreshKey]);
-
-  const setContractAddress = (value: string) => {
-    setAddress(value);
-    if (!value.trim()) setLoad({ status: 'empty' });
-  };
+  useEffect(() => { void loadState(); }, [loadState, refreshKey]);
 
   return (
     <div className="page">
       <header className="hero">
-        <h1>Supply Chain with Hidden Suppliers</h1>
+        <div className="hero-top">
+          <h1>ChainShield</h1>
+          <WalletConnect wallet={wallet} />
+        </div>
         <p className="tagline">
-          Every product below carries <em>zero-knowledge proven</em> claims — ethical sourcing,
-          certification, fair pricing and a verifiable <strong>MANUFACTURED → IN_TRANSIT → DELIVERED</strong>
-          lifecycle — with the underlying supplier records kept private.
+          A privacy-first supply chain on <strong>Midnight</strong>. Every product below carries{' '}
+          <em>zero-knowledge proven</em> claims — ethical sourcing, certification, fair pricing and a
+          verifiable <strong>MANUFACTURED → IN_TRANSIT → DELIVERED</strong> lifecycle — while the
+          underlying supplier records stay private.
         </p>
+        <p className="privacy-note">Proved without revealing your input.</p>
       </header>
+
+      <ProveActions wallet={wallet} config={netConfig} />
 
       <section className="panel">
         <label className="field">
           <span>Contract address</span>
-          <input
-            value={address}
-            onChange={(e) => setContractAddress(e.target.value)}
-            placeholder="0x… (from .midnight-state.json)"
-            spellCheck={false}
-          />
+          <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Contract ID (from .midnight-state.json / .env)" spellCheck={false} />
         </label>
-        <button onClick={() => setRefreshKey((k) => k + 1)} disabled={!address.trim()}>
-          Refresh
-        </button>
+        <button onClick={() => setRefreshKey((k) => k + 1)} disabled={!address.trim()}>Refresh</button>
         <p className="hint">
-          Network: <strong>{config.network}</strong> · Indexer: <code>{config.indexerUrl}</code>
+          Network: <strong>{netConfig.network}</strong> · Indexer: <code>{netConfig.indexerUrl}</code>
         </p>
       </section>
 
       <section className="panel">
         <h2>Public certification ledger</h2>
-
         {load.status === 'loading' && <p className="muted">Decoding on-chain state…</p>}
-        {load.status === 'empty' && (
-          <p className="muted">
-            Enter a deployed contract address above, or run <code>npm run setup</code> first.
-          </p>
-        )}
+        {load.status === 'empty' && <p className="muted">Enter a deployed contract address above, or run <code>npm run setup</code> first.</p>}
         {load.status === 'error' && <p className="error">Failed to read state: {load.message}</p>}
-
         {load.status === 'ready' && (
           <>
-            {load.ledger.products.length === 0 ? (
-              <p className="muted">Contract is deployed but no products are registered yet.</p>
-            ) : (
-              <>
-                <Stats products={load.ledger.products} />
-                <div className="products">
-                  {load.ledger.products.map((p) => (
-                    <ProductRow key={p.productId} product={p} />
-                  ))}
-                </div>
-              </>
-            )}
-            <p className="hint">
-              Company authority key: <code>{load.ledger.authority}</code>
-            </p>
+            {load.ledger.products.length === 0
+              ? <p className="muted">Contract is deployed but no products are registered yet.</p>
+              : (<> <Stats products={load.ledger.products} /> <div className="products"> {load.ledger.products.map((p) => <ProductRow key={p.productId} product={p} />)} </div> </>)}
+            <p className="hint">Company authority key: <code>{load.ledger.authority}</code></p>
           </>
         )}
       </section>
@@ -203,11 +166,10 @@ export default function App() {
           <li>The logistics routes used</li>
         </ul>
         <p>
-          Only claims cross the public boundary: the proof booleans, the certified
-          count, the committed fair floor, the lifecycle stage and a derived
-          compliance score. To <em>register</em>, re-verify, ship, deliver or withdraw
-          a product, run <code>npm run cli</code> — those actions build zero-knowledge
-          proofs in the CLI wallet and never publish the private supplier records.
+          Only claims cross the proof boundary: the claim booleans, the certified count, the fair floor,
+          the stage and a derived compliance score. To publish one, connect a Midnight wallet on{' '}
+          <strong>{networkLabel(netConfig.network)}</strong> and use <em>Prove &amp; publish</em> above — the
+          proof is generated without ever revealing the private supplier list.
         </p>
       </section>
     </div>

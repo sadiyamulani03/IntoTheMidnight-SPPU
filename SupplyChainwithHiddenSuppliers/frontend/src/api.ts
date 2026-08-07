@@ -47,14 +47,18 @@ export interface DashboardConfig {
   network: string;
 }
 
-/** Resolve configuration from Vite env vars with local-devnet defaults. */
+/** Resolve configuration from Vite env vars with chaines defaulting. */
 export function getConfig(): DashboardConfig {
   return {
     indexerUrl:
+      import.meta.env.VITE_INDEXER_URL ??
       import.meta.env.VITE_MIDNIGHT_INDEXER_URL ??
-      'http://127.0.0.1:8088/api/v4/graphql',
-    contractAddress: import.meta.env.VITE_MIDNIGHT_CONTRACT_ADDRESS ?? '',
-    network: import.meta.env.VITE_MIDNIGHT_NETWORK ?? 'undeployed',
+      'https://indexer.preview.midnight.network',
+    contractAddress:
+      import.meta.env.VITE_CONTRACT_ADDRESS ??
+      import.meta.env.VITE_MIDNIGHT_CONTRACT_ADDRESS ??
+      '',
+    network: import.meta.env.VITE_NETWORK ?? 'preview',
   };
 }
 
