@@ -23,6 +23,10 @@ export default defineConfig({
   // The compact runtime's WASM is loaded directly (ESM wasm import), which
   // needs special handling in Rollup-based bundlers.
   optimizeDeps: {
+    // compact-runtime is served as source (its WASM/ESM needs raw handling);
+    // object-inspect is a CJS (module.exports) dep it default-imports, so it
+    // must be pre-bundled or Vite never synthesises a `default` export.
     exclude: ['@midnight-ntwrk/compact-runtime'],
+    include: ['object-inspect'],
   },
 });
