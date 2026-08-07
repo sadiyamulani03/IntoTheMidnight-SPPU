@@ -3,6 +3,7 @@ import {
   fetchPublicState,
   getConfig,
   CLAIM_LABELS,
+  STAGES,
   type ProductClaim,
   type PublicLedger,
 } from './api';
@@ -19,6 +20,34 @@ function ClaimBadge({ ok }: { ok: boolean }) {
   return <span className={`badge ${ok ? 'badge-ok' : 'badge-no'}`}>{BOOL_LABEL[String(ok)]}</span>;
 }
 
+/** Lifecycle progress bar: MANUFACTURED (1) → IN_TRANSIT (2) → DELIVERED (3). */
+function StageBar({ stage }: { stage: number }) {
+  const steps = [1, 2, 3] as const;
+  return (
+    <div className="stage-bar">
+      {steps.map((step) => (
+        <div key={step} className={`stage-step ${stage >= step ? 'stage-on' : ''}`}>
+          <span className="stage-dot" />
+          <span className="stage-name">{STAGES[step]}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ScoreBar({ score }: { score: number }) {
+  const tone = score >= 100 ? 'score-full' : score >= 60 ? 'score-mid' : 'score-low';
+  return (
+    <div className="score-row">
+      <span className="muted">Compliance score</span>
+      <div className="score-track">
+        <div className={`score-fill ${tone}`} style={{ width: `${Math.min(score, 100)}%` }} />
+      </div>
+      <strong className="score-value">{score}/100</strong>
+    </div>
+  );
+}
+
 function ProductRow({ product }: { product: ProductClaim }) {
   return (
     <div className="product-card">
@@ -28,6 +57,12 @@ function ProductRow({ product }: { product: ProductClaim }) {
           re-audits on chain: {product.auditCount}
         </span>
       </div>
+      <div className="product-meta">
+        <span className="muted">batch:</span> <code>{product.batchId}</code>
+        <span className="muted"> · quantity:</span> {product.quantity.toString()} units
+      </div>
+      <StageBar stage={product.stage} />
+      <ScoreBar score={product.complianceScore} />
       <div className="product-claims">
         <div className="claim">
           <ClaimBadge ok={product.isEthical} />
@@ -48,6 +83,23 @@ function ProductRow({ product }: { product: ProductClaim }) {
           <span className="muted">(fair-trade floor: {product.fairFloor.toString()} — actual prices stay private)</span>
         </div>
       </div>
+    </div>
+  );
+}
+
+function Stats({ products }: { products: ProductClaim[] }) {
+  const total = products.length;
+  const delivered = products.filter((p) => p.stage >= 3).length;
+  const inTransit = products.filter((p) => p.stage === 2).length;
+  const avgScore = total === 0 ? 0 : Math.round(products.reduce((s, p) => s + p.complianceScore, 0) / total);
+  const fullyCompliant = products.filter((p) => p.complianceScore >= 100).length;
+  return (
+    <div className="stats">
+      <div className="stat"><span className="stat-num">{total}</span><span className="stat-label">products</span></div>
+      <div className="stat"><span className="stat-num">{delivered}</span><span className="stat-label">delivered</span></div>
+      <div className="stat"><span className="stat-num">{inTransit}</span><span className="stat-label">in transit</span></div>
+      <div className="stat"><span className="stat-num">{fullyCompliant}/{total}</span><span className="stat-label">100% compliant</span></div>
+      <div className="stat"><span className="stat-num">{avgScore}</span><span className="stat-label">avg score</span></div>
     </div>
   );
 }
@@ -87,7 +139,8 @@ export default function App() {
         <h1>Supply Chain with Hidden Suppliers</h1>
         <p className="tagline">
           Every product below carries <em>zero-knowledge proven</em> claims — ethical sourcing,
-          certification and fair pricing — with the underlying supplier records kept private.
+          certification, fair pricing and a verifiable <strong>MANUFACTURED → IN_TRANSIT → DELIVERED</strong>
+          lifecycle — with the underlying supplier records kept private.
         </p>
       </header>
 
@@ -125,11 +178,14 @@ export default function App() {
             {load.ledger.products.length === 0 ? (
               <p className="muted">Contract is deployed but no products are registered yet.</p>
             ) : (
-              <div className="products">
-                {load.ledger.products.map((p) => (
-                  <ProductRow key={p.productId} product={p} />
-                ))}
-              </div>
+              <>
+                <Stats products={load.ledger.products} />
+                <div className="products">
+                  {load.ledger.products.map((p) => (
+                    <ProductRow key={p.productId} product={p} />
+                  ))}
+                </div>
+              </>
             )}
             <p className="hint">
               Company authority key: <code>{load.ledger.authority}</code>
@@ -147,9 +203,11 @@ export default function App() {
           <li>The logistics routes used</li>
         </ul>
         <p>
-          To <em>register</em> or re-verify a product, prove fair pricing, or withdraw a claim,
-          run <code>npm run cli</code> — those actions build zero-knowledge proofs in the CLI
-          wallet and never publish the private supplier records.
+          Only claims cross the public boundary: the proof booleans, the certified
+          count, the committed fair floor, the lifecycle stage and a derived
+          compliance score. To <em>register</em>, re-verify, ship, deliver or withdraw
+          a product, run <code>npm run cli</code> — those actions build zero-knowledge
+          proofs in the CLI wallet and never publish the private supplier records.
         </p>
       </section>
     </div>

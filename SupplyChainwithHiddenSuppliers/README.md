@@ -5,9 +5,10 @@ company **prove** its supply chain is ethical — without revealing the
 suppliers behind it.
 
 > Every product is proven to be **ethically sourced**, backed only by
-> **certified** suppliers, shipped over **compliant routes**, and paid at a
-> **fair-trade floor** — all while supplier identities, certificates, prices
-> and routes stay private.
+> **certified** suppliers, shipped over **compliant routes**, paid at a
+> **fair-trade floor**, and tracked through a verifiable lifecycle
+> (**MANUFACTURED → IN_TRANSIT → DELIVERED**) — all while supplier identities,
+> certificates, prices and routes stay private.
 
 ## The privacy model
 
@@ -17,10 +18,13 @@ worlds:
 | Goes **on chain** (public)                                  | Stays **private** (proved in ZK, then dropped)            |
 | ----------------------------------------------------------- | --------------------------------------------------------- |
 | product ID                                                  | supplier identities (only a `certifiedCount` is revealed) |
-| claim booleans: `isEthical`, `allCertified`, `fairPricing`  | individual certificates + expiry dates                    |
-| `certifiedCount` (aggregate — count only)                   | prices actually paid to each supplier                    |
-| public `fairFloor` committed by the company                 | logistics routes                                          |
-| `auditCount` (how many re-verifications)                    | the company's secret key                                  |
+| `batchId` and `quantity` metadata                           | individual certificates + expiry dates                    |
+| `stage` (1 = MANUFACTURED · 2 = IN_TRANSIT · 3 = DELIVERED) | prices actually paid to each supplier                    |
+| claim booleans: `isEthical`, `allCertified`, `fairPricing`  | logistics routes                                          |
+| `certifiedCount` (aggregate — count only)                   | the company's secret key                                  |
+| public `fairFloor` committed by the company                 |                                                           |
+| `auditCount` (how many re-verifications)                    |                                                           |
+| `complianceScore` (derived 0–100 health score)              |                                                           |
 | the company's derived public key (`authority`)              |                                                           |
 
 Every circuit folds over a private `Vector<8, Supplier>` (identity hash,
@@ -32,20 +36,21 @@ behind them.
 ## Architecture
 
 ```
-src/contract/index.compact        Compact smart contract (the ZK logic)
-src/contract.ts                   Compiled-contract binding (witness + assets)
-src/deploy.ts                     Deploys the contract to a Midnight network
-src/cli.ts                        Interactive CLI (registers/audits products)
-src/network.ts                    Network selection, seeds, deployment records
-src/wallet.ts                     Wallet creation + sync (midnight SDK)
-src/providers.ts                  Shared SDK provider wiring
-src/keys.ts                       Deterministic company authority key
-src/suppliers.ts                  Private supplier witness builders
-src/setup.ts                      One-shot bootstrap: compile → deploy → save
-scripts/e2e-check.ts              Full end-to-end smoke check (all 4 circuits)
-frontend/                         Public claims dashboard (Vite + React)
-tests/                            Offline unit tests (vitest)
-compose.yml                       Local Midnight devnet (node + indexer + prover)
+contracts/supply-chain.compact        Compact smart contract (the ZK logic)
+src/contract.ts                       Compiled-contract binding (witness + assets)
+src/deploy.ts                         Deploys the contract to a Midnight network
+src/cli.ts                            Interactive CLI (registers/audits/ships products)
+src/network.ts                        Network selection, seeds, deployment records
+src/wallet.ts                         Wallet creation + sync (midnight SDK)
+src/providers.ts                      Shared SDK provider wiring
+src/keys.ts                           Deterministic company authority key
+src/suppliers.ts                      Private supplier witness builders
+src/setup.ts                          One-shot bootstrap: compile → deploy → save
+scripts/e2e-check.ts                  Full end-to-end smoke check (all 6 circuits)
+scripts/register-demo.ts              Seeds the dashboard with demo products
+frontend/                             Public claims dashboard (Vite + React)
+tests/                                Offline unit tests (vitest)
+compose.yml                           Local Midnight devnet (node + indexer + prover)
 ```
 
 ## Requirements
@@ -77,23 +82,31 @@ contract address in `.midnight-state.json`.
 
 ```bash
 npm run cli          # interactive menu:
-                     #   1 register  · 2 recertify · 3 prove fair pricing
-                     #   4 withdraw · 5 read claims · 6 balance · 7 exit
+                     #   1 register · 2 recertify · 3 prove fair pricing
+                     #   4 ship · 5 deliver · 6 withdraw
+                     #   7 read claims · 8 balance · 9 exit
 npm run test         # offline unit tests (vitest)
 npm run test:e2e     # on-chain smoke check against the deployed contract
-npm run register-demo # registers a demo product and leaves it on the ledger
+npm run register-demo # seeds the ledger with demo products at each lifecycle stage
 npm run frontend:dev # public claims dashboard (http://localhost:5173)
 ```
 
-The CLI walks through the four circuits, each of which produces a real
+The CLI walks through all six circuits, each of which produces a real
 zero-knowledge proof on the devnet:
 
-- **registerProduct** — publish claims for a new product.
-- **recertifyProduct** — re-prove the same claims on a fresh supplier list,
-  enforce the certificate-expiry policy, bump `auditCount`.
-- **proveFairPricing** — prove every supplier is paid ≥ the public floor.
-- **withdrawClaim** — remove a claim; ownership proven from the secret key
-  without ever revealing it.
+1. **registerProduct** — publish claims + batch metadata for a new product at
+   stage MANUFACTURED (compliance score 80/100 before pricing is proven).
+2. **recertifyProduct** — re-prove the same claims on a fresh supplier list,
+   enforce the certificate-expiry policy, bump `auditCount`.
+3. **proveFairPricing** — prove every supplier is paid ≥ the public floor;
+   the score climbs to 100/100.
+4. **shipProduct** — move MANUFACTURED → IN_TRANSIT; requires a fresh proof
+   that every supplier is still certified/ethical and every route compliant.
+5. **deliverProduct** — move IN_TRANSIT → DELIVERED; proves the delivered
+   quantity never exceeds the committed batch and every route + price floor
+   still holds.
+6. **withdrawClaim** — remove a claim; ownership proven from the secret key
+   without ever revealing it.
 
 Answer any sourcing question with `n` and the proof fails — claims cannot be
 faked.
@@ -102,8 +115,10 @@ faked.
 
 `npm run frontend:dev` runs a read-only dashboard that decodes the contract's
 public state straight from the indexer and renders the certification ledger —
-the exact view a third-party auditor would have. Supplier records never touch
-the browser.
+the exact view a third-party auditor would have. For each product it shows the
+lifecycle timeline (MANUFACTURED → IN_TRANSIT → DELIVERED), batch/quantity, the
+compliance score and the proven claims, plus aggregate stats across the whole
+ledger. Supplier records never touch the browser.
 
 ```bash
 cd frontend
@@ -135,7 +150,7 @@ used for the node/indexer/faucet.
 
 ## Project structure
 
-- `src/contract/index.compact` — the Compact contract (privacy logic).
+- `contracts/supply-chain.compact` — the Compact contract (privacy logic).
 - `frontend/` — Vite + React dashboard of the public claims.
 - `tests/` — offline unit tests (network config, supplier witnesses, key
   derivation, contract assembly).

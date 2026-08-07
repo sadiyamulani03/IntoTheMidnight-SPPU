@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hexToBytes, bytesToHex, CLAIM_LABELS } from './api';
+import { hexToBytes, bytesToHex, CLAIM_LABELS, STAGES } from './api';
 
 describe('hexToBytes / bytesToHex', () => {
   it('round-trips byte arrays', () => {
@@ -25,5 +25,13 @@ describe('CLAIM_LABELS', () => {
     expect(CLAIM_LABELS.allCertified).toContain('certified');
     expect(CLAIM_LABELS.allRoutesCompliant).toContain('compliant');
     expect(CLAIM_LABELS.fairPricing).toContain('pricing');
+  });
+});
+
+describe('STAGES', () => {
+  it('maps the lifecycle stages 1 → 3', () => {
+    expect(STAGES[1]).toBe('MANUFACTURED');
+    expect(STAGES[2]).toBe('IN_TRANSIT');
+    expect(STAGES[3]).toBe('DELIVERED');
   });
 });

@@ -30,6 +30,8 @@ const deployed: any = await findDeployedContract(providers, {
 });
 
 const productId = `prod-${Date.now()}`;
+const batchId = `batch-${Date.now()}`;
+const quantity = 1000n;
 const suppliers = buildSuppliers({
   certified: true,
   ethical: true,
@@ -37,9 +39,24 @@ const suppliers = buildSuppliers({
   certExpiry: 2100n * 365n * 24n * 3600n,
   pricePaid: 120n,
 });
-await deployed.callTx.registerProduct(productId, suppliers);
+
+// Product A: full lifecycle → DELIVERED, score 100
+await deployed.callTx.registerProduct(productId, batchId, quantity, suppliers);
 console.log(`REGISTERED ${productId}`);
 await deployed.callTx.recertifyProduct(productId, 2030n * 365n * 24n * 3600n, suppliers);
 await deployed.callTx.proveFairPricing(productId, 100n, suppliers);
-console.log('DEMO_PRODUCT=' + productId);
+await deployed.callTx.shipProduct(productId, suppliers);
+await deployed.callTx.deliverProduct(productId, quantity, suppliers);
+
+// Product B: shipped but not yet delivered → IN_TRANSIT, score 100
+const productB = `prod-${Date.now() + 1}`;
+await deployed.callTx.registerProduct(productB, `batch-${Date.now() + 1}`, quantity, suppliers);
+await deployed.callTx.proveFairPricing(productB, 100n, suppliers);
+await deployed.callTx.shipProduct(productB, suppliers);
+
+// Product C: just registered → MANUFACTURED, score 80
+const productC = `prod-${Date.now() + 2}`;
+await deployed.callTx.registerProduct(productC, `batch-${Date.now() + 2}`, quantity, suppliers);
+
+console.log('DEMO_PRODUCTS=' + [productId, productB, productC].join(','));
 await walletCtx.wallet.stop();

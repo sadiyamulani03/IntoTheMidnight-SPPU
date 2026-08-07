@@ -13,6 +13,9 @@ import type { ChargedState, StateValue } from '@midnight-ntwrk/compact-runtime';
 /** A product's public certification record as stored on the ledger. */
 export interface ProductClaim {
   productId: string;
+  batchId: string;
+  quantity: bigint;
+  stage: number;
   isEthical: boolean;
   allCertified: boolean;
   certifiedCount: number;
@@ -20,7 +23,16 @@ export interface ProductClaim {
   fairFloor: bigint;
   fairPricing: boolean;
   auditCount: number;
+  complianceScore: number;
 }
+
+/** Lifecycle stages as published by the contract (1 → 3). */
+export const STAGES = {
+  1: 'MANUFACTURED',
+  2: 'IN_TRANSIT',
+  3: 'DELIVERED',
+} as const;
+export type Stage = keyof typeof STAGES;
 
 export interface PublicLedger {
   products: ProductClaim[];
@@ -91,6 +103,9 @@ export async function fetchRawState(indexerUrl: string, address: string): Promis
 }
 
 interface PublicLedgerRecord {
+  batchId: string;
+  quantity: bigint;
+  stage: bigint;
   isEthical: boolean;
   allCertified: boolean;
   certifiedCount: bigint;
@@ -98,6 +113,7 @@ interface PublicLedgerRecord {
   fairFloor: bigint;
   fairPricing: boolean;
   auditCount: bigint;
+  complianceScore: bigint;
 }
 
 interface LedgerDecoder {
@@ -131,6 +147,9 @@ export async function decodePublicLedger(stateHex: string): Promise<PublicLedger
   for (const [productId, record] of decoded.products) {
     products.push({
       productId,
+      batchId: record.batchId,
+      quantity: record.quantity,
+      stage: Number(record.stage),
       isEthical: record.isEthical,
       allCertified: record.allCertified,
       certifiedCount: Number(record.certifiedCount),
@@ -138,6 +157,7 @@ export async function decodePublicLedger(stateHex: string): Promise<PublicLedger
       fairFloor: record.fairFloor,
       fairPricing: record.fairPricing,
       auditCount: Number(record.auditCount),
+      complianceScore: Number(record.complianceScore),
     });
   }
   products.sort((a, b) => a.productId.localeCompare(b.productId));
@@ -157,7 +177,7 @@ export async function fetchPublicState(indexerUrl: string, address: string): Pro
 }
 
 /** Friendly labels for the public claims, used by the dashboard. */
-export const CLAIM_LABELS: Record<keyof Omit<ProductClaim, 'productId' | 'certifiedCount' | 'fairFloor' | 'auditCount'>, string> = {
+export const CLAIM_LABELS: Record<keyof Omit<ProductClaim, 'productId' | 'batchId' | 'quantity' | 'stage' | 'certifiedCount' | 'fairFloor' | 'auditCount' | 'complianceScore'>, string> = {
   isEthical: 'Ethically sourced',
   allCertified: 'All suppliers certified',
   allRoutesCompliant: 'Routes compliant',

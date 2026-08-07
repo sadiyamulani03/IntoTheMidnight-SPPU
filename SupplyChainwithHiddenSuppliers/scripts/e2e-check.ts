@@ -1,10 +1,10 @@
 /**
  * End-to-end smoke check for Supply Chain with Hidden Suppliers.
  *
- * Connects to the deployed contract with the real wallet, runs all four
- * circuits (register → recertify → proveFairPricing → withdrawClaim), reads
- * the public ledger back through the indexer at each step, and exits 0 on
- * success. Used by `npm run test:e2e`.
+ * Connects to the deployed contract with the real wallet, runs the full
+ * product lifecycle (register → recertify → proveFairPricing → ship →
+ * deliver → withdrawClaim), reads the public ledger back through the indexer
+ * at each step, and exits 0 on success. Used by `npm run test:e2e`.
  *
  * The supplier records passed to the circuits are PRIVATE witness data — they
  * are only ever used to build proofs, never logged.
@@ -78,6 +78,8 @@ async function main() {
   };
 
   const productId = `e2e-${Date.now()}`;
+  const batchId = `batch-e2e-${Date.now()}`;
+  const quantity = 1000n;
   const suppliers = buildSuppliers({
     certified: true,
     ethical: true,
@@ -87,8 +89,8 @@ async function main() {
   });
 
   // 5. registerProduct
-  console.log(`Registering product ${productId}...`);
-  await deployed.callTx.registerProduct(productId, suppliers);
+  console.log(`Registering product ${productId} (batch ${batchId}, ${quantity} units)...`);
+  await deployed.callTx.registerProduct(productId, batchId, quantity, suppliers);
   console.log('✓ registerProduct completed');
 
   let ledger = await readLedger();
@@ -98,7 +100,12 @@ async function main() {
     fail(`Registered product claims incorrect: ${JSON.stringify(record)}`);
   }
   if (record.certifiedCount !== 8n) fail(`Expected certifiedCount 8, got ${record.certifiedCount}`);
-  console.log(`✓ Ledger shows allCertified=true, isEthical=true, certifiedCount=8 (count only)`);
+  if (record.stage !== 1n) fail(`Expected stage 1 (MANUFACTURED), got ${record.stage}`);
+  if (record.batchId !== batchId) fail(`Batch not recorded: ${record.batchId}`);
+  if (record.quantity !== quantity) fail(`Quantity not recorded: ${record.quantity}`);
+  if (record.complianceScore !== 80n) fail(`Expected complianceScore 80, got ${record.complianceScore}`);
+  console.log('✓ Ledger shows allCertified=true, isEthical=true, certifiedCount=8 (count only)');
+  console.log('✓ Stage MANUFACTURED, batch/quantity recorded, complianceScore=80/100');
 
   // 6. recertifyProduct
   console.log(`Recertifying product ${productId}...`);
@@ -119,9 +126,31 @@ async function main() {
   record = ledger?.products.lookup(productId);
   if (!record?.fairPricing) fail('fairPricing not recorded as proven');
   if (record?.fairFloor !== 100n) fail(`Expected fairFloor 100, got ${record?.fairFloor}`);
+  if (record?.complianceScore !== 100n) fail(`Expected complianceScore 100 after fair pricing, got ${record?.complianceScore}`);
   console.log('✓ fairPricing=true with public floor committed (prices stayed private)');
+  console.log('✓ complianceScore climbed to 100/100');
 
-  // 8. withdrawClaim
+  // 8. shipProduct (MANUFACTURED → IN_TRANSIT)
+  console.log(`Shipping product ${productId}...`);
+  await deployed.callTx.shipProduct(productId, suppliers);
+  console.log('✓ shipProduct completed');
+
+  ledger = await readLedger();
+  record = ledger?.products.lookup(productId);
+  if (record?.stage !== 2n) fail(`Expected stage 2 (IN_TRANSIT), got ${record?.stage}`);
+  console.log('✓ Stage advanced to IN_TRANSIT');
+
+  // 9. deliverProduct (IN_TRANSIT → DELIVERED)
+  console.log(`Delivering product ${productId} (${quantity} units)...`);
+  await deployed.callTx.deliverProduct(productId, quantity, suppliers);
+  console.log('✓ deliverProduct completed');
+
+  ledger = await readLedger();
+  record = ledger?.products.lookup(productId);
+  if (record?.stage !== 3n) fail(`Expected stage 3 (DELIVERED), got ${record?.stage}`);
+  console.log('✓ Stage advanced to DELIVERED');
+
+  // 10. withdrawClaim
   console.log(`Withdrawing claim for ${productId}...`);
   await deployed.callTx.withdrawClaim(productId);
   console.log('✓ withdrawClaim completed');

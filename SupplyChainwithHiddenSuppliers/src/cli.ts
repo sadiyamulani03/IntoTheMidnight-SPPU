@@ -73,15 +73,18 @@ async function readProducts(providers: Awaited<ReturnType<typeof createProviders
   }
   const decoded = (await getSupplyChainModule()).ledger(contractState.data);
   const products = decoded.products;
+  const STAGES: Record<number, string> = { 1: 'MANUFACTURED', 2: 'IN_TRANSIT', 3: 'DELIVERED' };
   console.log('\n  📋 Registered products:');
   if (products.isEmpty()) {
     console.log('     (none)');
   } else {
     for (const [productId, record] of products) {
       console.log(`     • ${productId}`);
+      console.log(`         batch: ${record.batchId} | quantity: ${record.quantity} | stage: ${STAGES[Number(record.stage)] ?? record.stage}`);
       console.log(`         isEthical: ${record.isEthical} | allCertified: ${record.allCertified}`);
       console.log(`         certifiedCount: ${record.certifiedCount} / 8 | allRoutesCompliant: ${record.allRoutesCompliant}`);
       console.log(`         fairFloor: ${record.fairFloor} | fairPricing: ${record.fairPricing} | audits: ${record.auditCount}`);
+      console.log(`         complianceScore: ${record.complianceScore} / 100`);
     }
   }
   console.log('');
@@ -157,16 +160,20 @@ async function main() {
       console.log('  1. Register a product (prove: all suppliers certified + ethical)');
       console.log('  2. Recertify a product (re-audit + cert-expiry policy)');
       console.log('  3. Prove fair pricing (all prices ≥ public floor)');
-      console.log('  4. Withdraw a claim (owner-only, ZK-authenticated)');
-      console.log('  5. Read products (public state via indexer)');
-      console.log('  6. Check wallet balance');
-      console.log('  7. Exit\n');
+      console.log('  4. Ship a product (MANUFACTURED → IN_TRANSIT)');
+      console.log('  5. Deliver a product (IN_TRANSIT → DELIVERED)');
+      console.log('  6. Withdraw a claim (owner-only, ZK-authenticated)');
+      console.log('  7. Read products (public state via indexer)');
+      console.log('  8. Check wallet balance');
+      console.log('  9. Exit\n');
 
       const choice = await ask(rl, '  Your choice: ');
 
       switch (choice.trim()) {
         case '1': {
           const productId = (await ask(rl, '  Product ID: ')).trim();
+          const batchId = (await ask(rl, '  Batch ID: ')).trim();
+          const quantity = BigInt((await ask(rl, '  Quantity (units): ')).trim() || '1000');
           const certified = (await ask(rl, '  All suppliers certified? (y/n): ')).trim().toLowerCase() === 'y';
           const ethical = (await ask(rl, '  All suppliers ethical? (y/n): ')).trim().toLowerCase() === 'y';
           const routes = (await ask(rl, '  All routes compliant? (y/n): ')).trim().toLowerCase() === 'y';
@@ -174,8 +181,9 @@ async function main() {
           const suppliers = buildSuppliers({ certified, ethical, routes, certExpiry: 2100n * 365n * 24n * 3600n, pricePaid });
           console.log('\n  Proving without revealing your supplier list... (this may take 30-60s)');
           try {
-            const tx = await deployed.callTx.registerProduct(productId, suppliers);
+            const tx = await deployed.callTx.registerProduct(productId, batchId, quantity, suppliers);
             console.log(`\n  ✅ Product registered: "${productId}"`);
+            console.log(`     batch: ${batchId} | quantity: ${quantity} | stage: MANUFACTURED`);
             console.log(`     isEthical: ${ethical} | allCertified: ${certified} | certifiedCount: ${certified ? 8 : 0}`);
             console.log(`     Transaction ID: ${tx.public.txId}`);
             console.log(`     Block height: ${tx.public.blockHeight}\n`);
@@ -231,6 +239,45 @@ async function main() {
 
         case '4': {
           const productId = (await ask(rl, '  Product ID: ')).trim();
+          const suppliers = buildSuppliers({
+            certified: true, ethical: true, routes: true,
+            certExpiry: 2100n * 365n * 24n * 3600n,
+            pricePaid: 100n,
+          });
+          console.log('\n  Proving routes + supplier status WITHOUT revealing the supplier list... (this may take 30-60s)');
+          try {
+            const tx = await deployed.callTx.shipProduct(productId, suppliers);
+            console.log(`\n  ✅ Product shipped: "${productId}" → IN_TRANSIT`);
+            console.log(`     Transaction ID: ${tx.public.txId}`);
+            console.log(`     Block height: ${tx.public.blockHeight}\n`);
+          } catch (error) {
+            console.error('\n  ❌ Failed:', error instanceof Error ? error.message : error);
+          }
+          break;
+        }
+
+        case '5': {
+          const productId = (await ask(rl, '  Product ID: ')).trim();
+          const quantityDelivered = BigInt((await ask(rl, '  Quantity delivered: ')).trim() || '1000');
+          const suppliers = buildSuppliers({
+            certified: true, ethical: true, routes: true,
+            certExpiry: 2100n * 365n * 24n * 3600n,
+            pricePaid: 120n,
+          });
+          console.log('\n  Proving delivery conditions (quantity ≤ batch, routes, fair pay) WITHOUT revealing them... (this may take 30-60s)');
+          try {
+            const tx = await deployed.callTx.deliverProduct(productId, quantityDelivered, suppliers);
+            console.log(`\n  ✅ Product delivered: "${productId}" → DELIVERED`);
+            console.log(`     Transaction ID: ${tx.public.txId}`);
+            console.log(`     Block height: ${tx.public.blockHeight}\n`);
+          } catch (error) {
+            console.error('\n  ❌ Failed:', error instanceof Error ? error.message : error);
+          }
+          break;
+        }
+
+        case '6': {
+          const productId = (await ask(rl, '  Product ID: ')).trim();
           console.log('\n  Proving company ownership in zero-knowledge... (this may take 30-60s)');
           try {
             const tx = await deployed.callTx.withdrawClaim(productId);
@@ -243,11 +290,11 @@ async function main() {
           break;
         }
 
-        case '5':
+        case '7':
           await readProducts(providers, deployment.address);
           break;
 
-        case '6': {
+        case '8': {
           console.log('\n  Checking balance...');
           const currentState = await walletCtx.wallet.waitForSyncedState();
           const currentBalance = currentState.unshielded.balances[unshieldedToken().raw] ?? 0n;
@@ -257,13 +304,13 @@ async function main() {
           break;
         }
 
-        case '7':
+        case '9':
           running = false;
           console.log('\n  👋 Goodbye!\n');
           break;
 
         default:
-          console.log('\n  ❌ Invalid choice. Please enter 1-7.\n');
+          console.log('\n  ❌ Invalid choice. Please enter 1-9.\n');
       }
     }
 

@@ -3,17 +3,22 @@ pragma language_version >= 0.23;
 import CompactStandardLibrary;
 
 // ════════════════════════════════════════════════════════════════════════════
-//  Supply Chain with Hidden Suppliers
+//  Supply Chain with Hidden Suppliers — product lifecycle edition
 //
 //  What the company proves WITHOUT revealing its commercial secrets:
 //    • every product is ethically sourced
 //    • every supplier behind a product is certified
 //    • every logistics route is compliant
 //    • every supplier is paid at least a public fair-trade floor
+//    • every product progresses through a verifiable lifecycle:
+//          MANUFACTURED (1) → IN_TRANSIT (2) → DELIVERED (3)
 //
 //  ── PUBLIC ledger state (visible to every on-chain observer) ────────────────
 //    products : Map<productId, ProductRecord>
 //        productId          the public product/SKU identifier
+//        batchId            public batch/lot the product belongs to
+//        quantity           committed units in the batch
+//        stage              lifecycle stage 1..3 (see above)
 //        isEthical          PROVEN claim — ethically sourced
 //        allCertified       PROVEN claim — every supplier certified
 //        certifiedCount     aggregate number of certified suppliers (count only)
@@ -21,6 +26,7 @@ import CompactStandardLibrary;
 //        fairFloor          public minimum unit price committed by the company
 //        fairPricing        PROVEN claim — every price ≥ fairFloor
 //        auditCount         how many times the claims were re-verified on-chain
+//        complianceScore    derived 0..100 health score of the product's claims
 //    authority   : Bytes<32>  public key of the owning company (set at deploy)
 //
 //  ── PRIVATE witness data (proved in zero-knowledge, NEVER on chain) ────────
@@ -33,9 +39,10 @@ import CompactStandardLibrary;
 //        routeCompliant whether the logistics route is within approved corridors
 //
 //  Disclosure policy (why disclose() sits exactly where it does):
-//    • productId, the claim booleans, the certified count and the committed
-//      fairFloor are the ONLY witness-derived values that cross the public
-//      boundary. Each is wrapped in disclose() at the point of use.
+//    • productId, batchId, quantity, stage, the claim booleans, the certified
+//      count, the committed fairFloor and the derived compliance score are the
+//      ONLY witness-derived values that cross the public boundary. Each is
+//      wrapped in disclose() at the point of use.
 //    • Supplier identities, certificate numbers, prices and routes are never
 //      disclosed: they exist only inside the wallet while a proof is being
 //      generated and are dropped immediately afterwards.
@@ -55,8 +62,11 @@ struct Supplier {
   routeCompliant: Boolean;
 }
 
-/// Public on-chain record of a product's certification claims.
+/// Public on-chain record of a product's certification claims and lifecycle.
 struct ProductRecord {
+  batchId: Opaque<"string">;
+  quantity: Uint<64>;
+  stage: Uint<8>;
   isEthical: Boolean;
   allCertified: Boolean;
   certifiedCount: Uint<8>;
@@ -64,6 +74,7 @@ struct ProductRecord {
   fairFloor: Uint<64>;
   fairPricing: Boolean;
   auditCount: Uint<64>;
+  complianceScore: Uint<8>;
 }
 
 /// A product references up to 8 suppliers (bounded at compile time).
@@ -91,6 +102,16 @@ circuit publicKey(sk: Bytes<32>): Bytes<32> {
 /// never disclosed anywhere.
 witness companySecretKey(): Bytes<32>;
 
+/// Derived 0..100 health score of a product's publicly proven claims:
+///   30  every supplier certified
+///   30  ethically sourced
+///   20  every logistics route compliant
+///   20  fair pricing proven (every supplier paid ≥ floor)
+circuit scoreOf(certified: Boolean, ethical: Boolean, routes: Boolean, fair: Boolean): Uint<8> {
+  const score = (certified ? 30 : 0) + (ethical ? 30 : 0) + (routes ? 20 : 0) + (fair ? 20 : 0);
+  return score as Uint<8>;
+}
+
 /// Constructor: bind the company authority to a private key held off-chain.
 /// The derived public key is deliberately disclosed; the private key is not.
 constructor(ownerSk: Bytes<32>) {
@@ -99,9 +120,10 @@ constructor(ownerSk: Bytes<32>) {
 
 // ── Circuit 1 · registerProduct ──────────────────────────────────────────────
 // Proves a product's sourcing claims from the private supplier list and
-// publishes them. Supplier identities, individual certificates, prices and
-// routes stay private — only the claims and the aggregate count go on chain.
-export circuit registerProduct(productId: Opaque<"string">, suppliers: Suppliers): [] {
+// publishes them at lifecycle stage MANUFACTURED. Supplier identities,
+// individual certificates, prices and routes stay private — only the claims
+// and the aggregate count go on chain.
+export circuit registerProduct(productId: Opaque<"string">, batchId: Opaque<"string">, quantity: Uint<64>, suppliers: Suppliers): [] {
   assert(!products.member(disclose(productId)), "Product already registered");
   const certified = fold((acc: Boolean, s: Supplier): Boolean => acc && s.isCertified, true, suppliers);
   const ethical = fold((acc: Boolean, s: Supplier): Boolean => acc && s.isEthical, true, suppliers);
@@ -111,6 +133,9 @@ export circuit registerProduct(productId: Opaque<"string">, suppliers: Suppliers
   assert(ethical, "Not all suppliers meet ethical sourcing rules");
   assert(routes, "Not all logistics routes are compliant");
   products.insert(disclose(productId), ProductRecord {
+    batchId: disclose(batchId),
+    quantity: disclose(quantity),
+    stage: disclose((1 as Uint<8>)),
     isEthical: disclose(ethical),
     allCertified: disclose(certified),
     certifiedCount: disclose(count as Uint<8>),
@@ -118,6 +143,7 @@ export circuit registerProduct(productId: Opaque<"string">, suppliers: Suppliers
     fairFloor: 0,
     fairPricing: false,
     auditCount: 0,
+    complianceScore: disclose(scoreOf(certified, ethical, routes, false)),
   });
 }
 
@@ -139,6 +165,9 @@ export circuit recertifyProduct(productId: Opaque<"string">, minExpiry: Uint<64>
   assert(notExpired, "A supplier certificate expires before the policy threshold");
   const record = products.lookup(disclose(productId));
   products.insert(disclose(productId), ProductRecord {
+    batchId: record.batchId,
+    quantity: record.quantity,
+    stage: record.stage,
     isEthical: disclose(ethical),
     allCertified: disclose(certified),
     certifiedCount: disclose(count as Uint<8>),
@@ -146,6 +175,7 @@ export circuit recertifyProduct(productId: Opaque<"string">, minExpiry: Uint<64>
     fairFloor: record.fairFloor,
     fairPricing: record.fairPricing,
     auditCount: (record.auditCount + 1) as Uint<64>,
+    complianceScore: disclose(scoreOf(certified, ethical, routes, record.fairPricing)),
   });
 }
 
@@ -159,6 +189,9 @@ export circuit proveFairPricing(productId: Opaque<"string">, fairFloor: Uint<64>
   assert(fair, "Not every supplier is paid at least the fair-trade floor");
   const record = products.lookup(disclose(productId));
   products.insert(disclose(productId), ProductRecord {
+    batchId: record.batchId,
+    quantity: record.quantity,
+    stage: record.stage,
     isEthical: record.isEthical,
     allCertified: record.allCertified,
     certifiedCount: record.certifiedCount,
@@ -166,10 +199,72 @@ export circuit proveFairPricing(productId: Opaque<"string">, fairFloor: Uint<64>
     fairFloor: disclose(fairFloor),
     fairPricing: disclose(fair),
     auditCount: record.auditCount,
+    complianceScore: disclose(scoreOf(record.allCertified, record.isEthical, record.allRoutesCompliant, fair)),
   });
 }
 
-// ── Circuit 4 · withdrawClaim ────────────────────────────────────────────────
+// ── Circuit 4 · shipProduct ──────────────────────────────────────────────────
+// Moves a MANUFACTURED product into transit. Requires fresh proofs that every
+// supplier is still certified and ethical and every route is compliant — a
+// product with lapsed suppliers cannot enter the logistics chain.
+export circuit shipProduct(productId: Opaque<"string">, suppliers: Suppliers): [] {
+  assert(products.member(disclose(productId)), "Product is not registered");
+  const record = products.lookup(disclose(productId));
+  assert(record.stage == (1 as Uint<8>), "Product is not in MANUFACTURED stage");
+  const certified = fold((acc: Boolean, s: Supplier): Boolean => acc && s.isCertified, true, suppliers);
+  const ethical = fold((acc: Boolean, s: Supplier): Boolean => acc && s.isEthical, true, suppliers);
+  const routes = fold((acc: Boolean, s: Supplier): Boolean => acc && s.routeCompliant, true, suppliers);
+  const count = fold((acc: Field, s: Supplier): Field => acc + (s.isCertified ? 1 : 0), (0 as Field), suppliers);
+  assert(certified, "Not all suppliers are certified");
+  assert(ethical, "Not all suppliers meet ethical sourcing rules");
+  assert(routes, "Not all logistics routes are compliant");
+  products.insert(disclose(productId), ProductRecord {
+    batchId: record.batchId,
+    quantity: record.quantity,
+    stage: disclose((2 as Uint<8>)),
+    isEthical: disclose(ethical),
+    allCertified: disclose(certified),
+    certifiedCount: disclose(count as Uint<8>),
+    allRoutesCompliant: disclose(routes),
+    fairFloor: record.fairFloor,
+    fairPricing: record.fairPricing,
+    auditCount: record.auditCount,
+    complianceScore: disclose(scoreOf(certified, ethical, routes, record.fairPricing)),
+  });
+}
+
+// ── Circuit 5 · deliverProduct ───────────────────────────────────────────────
+// Completes delivery: the product must be IN_TRANSIT, the delivered quantity
+// may not exceed the committed batch, every route must still be compliant, and
+// every supplier must still be paid at least the committed fair floor.
+export circuit deliverProduct(productId: Opaque<"string">, quantityDelivered: Uint<64>, suppliers: Suppliers): [] {
+  assert(products.member(disclose(productId)), "Product is not registered");
+  const record = products.lookup(disclose(productId));
+  assert(record.stage == (2 as Uint<8>), "Product is not in IN_TRANSIT stage");
+  assert(quantityDelivered <= record.quantity, "Delivered quantity exceeds the committed batch");
+  const certified = fold((acc: Boolean, s: Supplier): Boolean => acc && s.isCertified, true, suppliers);
+  const ethical = fold((acc: Boolean, s: Supplier): Boolean => acc && s.isEthical, true, suppliers);
+  const routes = fold((acc: Boolean, s: Supplier): Boolean => acc && s.routeCompliant, true, suppliers);
+  const count = fold((acc: Field, s: Supplier): Field => acc + (s.isCertified ? 1 : 0), (0 as Field), suppliers);
+  const fair = fold((acc: Boolean, s: Supplier): Boolean => acc && s.pricePaid >= record.fairFloor, true, suppliers);
+  assert(routes, "Not all logistics routes are compliant");
+  assert(fair, "Not every supplier is paid at least the fair-trade floor");
+  products.insert(disclose(productId), ProductRecord {
+    batchId: record.batchId,
+    quantity: record.quantity,
+    stage: disclose((3 as Uint<8>)),
+    isEthical: disclose(ethical),
+    allCertified: disclose(certified),
+    certifiedCount: disclose(count as Uint<8>),
+    allRoutesCompliant: disclose(routes),
+    fairFloor: record.fairFloor,
+    fairPricing: disclose(fair),
+    auditCount: record.auditCount,
+    complianceScore: disclose(scoreOf(certified, ethical, routes, fair)),
+  });
+}
+
+// ── Circuit 6 · withdrawClaim ────────────────────────────────────────────────
 // Lets the owning company retract a certification claim. Ownership is proven
 // in zero-knowledge from the private companySecretKey witness — the key never
 // appears on chain, only the derived public key does.

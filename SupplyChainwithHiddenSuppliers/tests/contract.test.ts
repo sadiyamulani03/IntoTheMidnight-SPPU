@@ -23,12 +23,22 @@ describe('compiled contract artifacts', () => {
     expect(indexDts).toContain('export declare class Contract');
   });
 
-  it('exposes ledger/product fields matching the contract header', () => {
+  it('exposes all six lifecycle circuits', () => {
     const indexDts = fs.readFileSync(path.join(zkConfigPath, 'contract', 'index.d.ts'), 'utf-8');
-    for (const field of ['registerProduct', 'recertifyProduct', 'proveFairPricing', 'withdrawClaim']) {
+    for (const field of [
+      'registerProduct', 'recertifyProduct', 'proveFairPricing',
+      'shipProduct', 'deliverProduct', 'withdrawClaim',
+    ]) {
       expect(indexDts).toContain(field);
     }
+  });
+
+  it('exposes ledger/product fields matching the contract header', () => {
+    const indexDts = fs.readFileSync(path.join(zkConfigPath, 'contract', 'index.d.ts'), 'utf-8');
     for (const field of ['isEthical', 'allCertified', 'certifiedCount', 'fairPricing']) {
+      expect(indexDts).toContain(field);
+    }
+    for (const field of ['batchId', 'quantity', 'stage', 'complianceScore']) {
       expect(indexDts).toContain(field);
     }
   });
