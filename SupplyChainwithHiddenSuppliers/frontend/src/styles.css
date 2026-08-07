@@ -457,3 +457,98 @@ code {
   font-size: 13px;
   margin-top: 6px;
 }
+
+/* ── Product detail / expandable ───────────────────────────────────── */
+.product-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  padding: 0;
+}
+.toggle { color: var(--muted); margin-left: auto; }
+
+/* ── Verifier statements ───────────────────────────────────────────── */
+.verifier {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+}
+.verifier-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.verifier-title { font-size: 13px; font-weight: 600; }
+.verifier-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.verifier-item { display: flex; align-items: baseline; gap: 8px; font-size: 13.5px; }
+.verifier-item.ok .vhook { color: var(--ok); }
+.verifier-item.no .vhook { color: var(--no); }
+.verifier-hint { font-size: 12px; flex: 1; }
+
+/* ── Consumer verification ─────────────────────────────────────────── */
+.verify-search { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+.verify-search input {
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 10px 12px;
+}
+.verify-result { border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+.verify-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+
+/* ── Ledger overview ──────────────────────────────────────────────── */
+.overview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin: 6px 0 18px;
+}
+.overview-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+}
+.overview-dist { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; }
+.dist-row { display: grid; grid-template-columns: 160px 1fr 28px; align-items: center; gap: 10px; }
+.dist-track { height: 8px; background: var(--border); border-radius: 99px; overflow: hidden; }
+.dist-fill { height: 100%; background: var(--accent); border-radius: 99px; }
+.dist-fill.on { background: var(--ok); }
+.dist-label { font-size: 12px; }
+
+/* ── ZK explainer ─────────────────────────────────────────────────── */
+.zk-examples { margin: 12px 0; padding-left: 18px; display: flex; flex-direction: column; gap: 8px; }
+.zk-examples li { font-size: 13.5px; }
+.zk-examples .reveal {
+  display: inline-block;
+  color: var(--muted);
+  text-decoration: line-through;
+  margin-right: 8px;
+}
+.owner-tag {
+  color: var(--no);
+  font-style: normal;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.badge-stage {
+  background: rgba(47, 129, 247, 0.14);
+  border: 1px solid rgba(47, 129, 247, 0.35);
+  color: var(--accent);
+  font-weight: 600;
+}

@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { fetchPublicState, CLAIM_LABELS, STAGES, type ProductClaim, type PublicLedger } from './api';
-import { getConfig, networkLabel } from './lib/networks';
+import { getConfig } from './lib/networks';
 import { useMidnight } from './hooks/useMidnight';
 import { WalletConnect } from './components/WalletConnect';
 import { ProveActions } from './components/ProveActions';
+import { LedgerOverview } from './components/LedgerOverview';
+import { ConsumerVerify } from './components/ConsumerVerify';
+import { VerifierStatements } from './components/VerifierStatements';
 
 type LoadState =
   | { status: 'loading' }
@@ -45,12 +48,14 @@ function ScoreBar({ score }: { score: number }) {
 }
 
 function ProductRow({ product }: { product: ProductClaim }) {
+  const [open, setOpen] = useState(false);
   return (
     <div className="product-card">
-      <div className="product-header">
+      <button className="product-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
         <span className="product-id">{product.productId}</span>
         <span className="audits">re-audits on chain: {product.auditCount}</span>
-      </div>
+        <span className="toggle">{open ? '▴' : '▾'}</span>
+      </button>
       <div className="product-meta">
         <span className="muted">batch:</span> <code>{product.batchId}</code>
         <span className="muted"> · quantity:</span> {product.quantity.toString()} units
@@ -71,6 +76,7 @@ function ProductRow({ product }: { product: ProductClaim }) {
           <span className="muted">(fair-trade floor: {product.fairFloor.toString()} — actual prices stay private)</span>
         </div>
       </div>
+      {open && <VerifierStatements product={product} />}
     </div>
   );
 }
@@ -132,6 +138,10 @@ export default function App() {
       <ProveActions wallet={wallet} config={netConfig} />
 
       <section className="panel">
+        <div className="panel-head">
+          <h2>Public certification ledger</h2>
+          <span className="privacy-tag">readable by anyone — private data never leaves the wallet</span>
+        </div>
         <label className="field">
           <span>Contract address</span>
           <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Contract ID (from .midnight-state.json / .env)" spellCheck={false} />
@@ -140,37 +150,43 @@ export default function App() {
         <p className="hint">
           Network: <strong>{netConfig.network}</strong> · Indexer: <code>{netConfig.indexerUrl}</code>
         </p>
-      </section>
-
-      <section className="panel">
-        <h2>Public certification ledger</h2>
         {load.status === 'loading' && <p className="muted">Decoding on-chain state…</p>}
-        {load.status === 'empty' && <p className="muted">Enter a deployed contract address above, or run <code>npm run setup</code> first.</p>}
         {load.status === 'error' && <p className="error">Failed to read state: {load.message}</p>}
-        {load.status === 'ready' && (
+        {load.status === 'empty' && <p className="muted">Enter a deployed contract address above, or run <code>npm run setup</code> first.</p>}
+        {load.status === 'ready' && load.ledger.products.length === 0 && (
+          <p className="muted">Contract is deployed but no products are registered yet.</p>
+        )}
+        {load.status === 'ready' && load.ledger.products.length > 0 && (
           <>
-            {load.ledger.products.length === 0
-              ? <p className="muted">Contract is deployed but no products are registered yet.</p>
-              : (<> <Stats products={load.ledger.products} /> <div className="products"> {load.ledger.products.map((p) => <ProductRow key={p.productId} product={p} />)} </div> </>)}
+            <Stats products={load.ledger.products} />
+            <LedgerOverview products={load.ledger.products} />
+            <div className="products">
+              {load.ledger.products.map((p) => <ProductRow key={p.productId} product={p} />)}
+            </div>
             <p className="hint">Company authority key: <code>{load.ledger.authority}</code></p>
           </>
         )}
       </section>
 
+      <ConsumerVerify products={load.status === 'ready' ? load.ledger.products : []} />
+
       <section className="panel privacy">
-        <h2>What stays private</h2>
-        <ul>
-          <li>Supplier identities (only a <code>certifiedCount</code> aggregate is revealed)</li>
-          <li>Individual certificates and their expiry dates</li>
-          <li>The prices actually paid to each supplier</li>
-          <li>The logistics routes used</li>
+        <div className="panel-head">
+          <h2>How privacy works</h2>
+          <span className="privacy-tag">selective disclosure</span>
+        </div>
+        <p>Instead of revealing the fact, ChainShield publishes a <strong>proof of the fact</strong>:</p>
+        <ul className="zk-examples">
+          <li><span className="reveal">Supplier: ABC Cotton Ltd · Maharashtra · ₹12,50,000</span> → <strong>✓ Supplier is government certified</strong></li>
+          <li><span className="reveal">Transport temperature: 3.4°C</span> → <strong>✓ Temperature remained within the required range</strong></li>
+          <li><span className="reveal">Factory: XYZ Manufacturing</span> → <strong>✓ Product manufactured by an approved facility</strong></li>
         </ul>
-        <p>
-          Only claims cross the proof boundary: the claim booleans, the certified count, the fair floor,
-          the stage and a derived compliance score. To publish one, connect a Midnight wallet on{' '}
-          <strong>{networkLabel(netConfig.network)}</strong> and use <em>Prove &amp; publish</em> above — the
-          proof is generated without ever revealing the private supplier list.
-        </p>
+        <p>Only the following cross the proof boundary:</p>
+        <ul>
+          <li>Claim booleans, the <code>certifiedCount</code> aggregate, the committed <code>fairFloor</code></li>
+          <li>Lifecycle stage, <code>auditCount</code>, derived compliance score</li>
+        </ul>
+        <p className="muted">Supplier identities, certificates + expiries, prices paid and routes never leave the wallet — they are generated at proof time, used for the zero-knowledge proof, and dropped.</p>
       </section>
     </div>
   );

@@ -26,14 +26,16 @@ type Wire =
   | 'recertifyProduct'
   | 'proveFairPricing'
   | 'shipProduct'
-  | 'deliverProduct';
+  | 'deliverProduct'
+  | 'withdrawClaim';
 
-const CIRCUITS: { kind: Wire; label: string; desc: string }[] = [
+const CIRCUITS: { kind: Wire; label: string; desc: string; ownerOnly?: boolean }[] = [
   { kind: 'registerProduct', label: 'Register product', desc: 'MANUFACTURED — every supplier certified, ethical, routes compliant.' },
   { kind: 'recertifyProduct', label: 'Re-certify', desc: 'Re-prove claims + no lapsed certs; bumps the on-chain audit.' },
   { kind: 'proveFairPricing', label: 'Prove fair pricing', desc: 'Every price ≥ public floor — prices stay private.' },
   { kind: 'shipProduct', label: 'Ship product', desc: 'MANUFACTURED → IN_TRANSIT.' },
   { kind: 'deliverProduct', label: 'Deliver product', desc: 'IN_TRANSIT → DELIVERED.' },
+  { kind: 'withdrawClaim', label: 'Withdraw claim', desc: 'Owner-only; removes a claim — ownership proven in ZK.', ownerOnly: true },
 ];
 
 const PRIVATE_STATE_ID = 'supplyChainPrivateState';
@@ -112,6 +114,9 @@ export function ProveActions({ wallet, config }: { wallet: UseMidnightReturn; co
       case 'deliverProduct':
         pubArgs.push(form.productId, BigInt(form.quantityDelivered || '0'));
         break;
+      case 'withdrawClaim':
+        pubArgs.push(form.productId);
+        break;
     }
 
     try {
@@ -161,6 +166,7 @@ export function ProveActions({ wallet, config }: { wallet: UseMidnightReturn; co
           >
             <strong>{c.label}</strong>
             <span>{c.desc}</span>
+            {c.ownerOnly && <em className="owner-tag">owner only</em>}
           </button>
         ))}
       </div>

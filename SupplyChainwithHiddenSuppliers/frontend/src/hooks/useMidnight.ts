@@ -87,16 +87,28 @@ export function useMidnight(): UseMidnightReturn {
       setState({ status: 'error', message: 'Midnight wallet extension not installed. Install the Midnight Wallet and refresh the page.' });
       return;
     }
+    if (Object.keys(win.midnight).length === 0) {
+      setState({ status: 'error', message: 'Midnight Wallet was detected but is not running on this page. Reload and enable it.' });
+      return;
+    }
     const apps = Object.values(win.midnight);
-    const app = apps.find((entry) => entry?.isEnabled && typeof entry?.wallet?.connect === 'function');
+    // The wallet extension is present, so prefer an entry whose `isEnabled` is
+    // already true, but DO NOT require it — most DApp connectors mark the app
+    // enabled only after the first, so we fall back to any entry with `connect`.
+    const candidates = apps.filter((entry) => entry?.wallet && typeof entry?.wallet?.connect === 'function');
+    const app = candidates.find((entry) => entry?.isEnabled === true) ?? candidates[0];
     if (!app) {
-      setState({ status: 'error', message: 'No enabled Midnight wallet found on this page. Unlock / enable it and retry.' });
+      setState({ status: 'error', message: 'No Midnight wallet found on this page. If the Midnight Wallet extension is installed, reload the page, then grant "Midnight" access when prompted.' });
       return;
     }
 
     setState({ status: 'connecting' });
     try {
-      const connected = await app.wallet!.connect!();
+      const connected = (await app.wallet!.connect!()) as MidnightConnectorWallet | undefined;
+      if (!connected) {
+        setState({ status: 'error', message: 'The wallet did not return a session. Your wallet may need to be unlocked — open it and retry.' });
+        return;
+      }
 
       // Network validation: where the wallet reports its network id, confirm it
       // matches the configured VITE_NETWORK so a mismatch can never be masked.
