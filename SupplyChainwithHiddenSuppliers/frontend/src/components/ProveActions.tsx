@@ -84,11 +84,13 @@ export function ProveActions({
   wallet,
   config,
   products,
+  demoMode = false,
   onDemoPublished,
 }: {
   wallet: UseMidnightReturn;
   config: ChainShieldEnv;
   products: ProductClaim[];
+  demoMode?: boolean;
   onDemoPublished?: (p: DemoPublish) => void;
 }) {
   const [active, setActive] = useState<Wire>('registerProduct');
@@ -109,17 +111,16 @@ export function ProveActions({
 
   const patch = (p: Partial<FlowForm>) => setForm((f) => ({ ...f, ...p }));
   const connected = wallet.state.status === 'connected' && !!wallet.address;
-  const demoMode = config.demoMode && !config.contractAddress;
-  const proveEnabled = config.enableProve || demoMode;
+  const demoActive = demoMode || (config.demoMode && !config.contractAddress);
 
   useEffect(() => {
-    if (demoMode) { setRelayOk(null); return; }
+    if (demoActive) { setRelayOk(null); return; }
     let alive = true;
     relayHealth(config.relayUrl).then((ok) => alive && setRelayOk(ok)).catch(() => alive && setRelayOk(false));
     return () => { alive = false; };
-  }, [config.relayUrl, demoMode]);
+  }, [config.relayUrl, demoActive]);
 
-  if (!proveEnabled) {
+  if (!(config.enableProve || demoActive)) {
     return (
       <div className="panel">
         <div className="panel-head">
@@ -142,7 +143,7 @@ export function ProveActions({
     setBusy(true);
     setOutcome(null);
 
-    if (demoMode) {
+    if (demoActive) {
       // Simulated prove: short delay, then reflect the publish in the demo ledger.
       await new Promise((r) => setTimeout(r, 600));
       onDemoPublished?.({
@@ -269,8 +270,8 @@ export function ProveActions({
         </p>
 
         <div className="status-pill" style={{ alignSelf: 'flex-start' }}>
-          <span className={`live-dot ${demoMode ? 'on' : relayOk === null ? 'busy' : relayOk ? 'on' : 'off'}`} />
-          {demoMode
+          <span className={`live-dot ${demoActive ? 'on' : relayOk === null ? 'busy' : relayOk ? 'on' : 'off'}`} />
+          {demoActive
             ? 'Simulated proof engine (demo)'
             : relayOk === null
               ? 'Checking proof relay…'
@@ -356,23 +357,23 @@ export function ProveActions({
         <div className="submit-row">
           <button
             className="btn-base btn-primary"
-            disabled={busy || (!demoMode && (!connected || !config.contractAddress))}
+            disabled={busy || (!demoActive && (!connected || !config.contractAddress))}
             onClick={() => void run()}
           >
-            {busy ? 'Proving…' : demoMode ? 'Prove & publish (demo)' : 'Prove & publish'}
+            {busy ? 'Proving…' : demoActive ? 'Prove & publish (demo)' : 'Prove & publish'}
           </button>
           {busy && (
             <span className="proof-status">
               <span className="prove-spinner" />
-              {demoMode
+              {demoActive
                 ? 'simulating a proof — private suppliers stay out of the UI'
                 : 'generating zero-knowledge proof — private data never leaves the relay'}
             </span>
           )}
-          {!demoMode && !connected && !busy && (
+          {!demoActive && !connected && !busy && (
             <span className="hint">Connect a wallet to authenticate the publish.</span>
           )}
-          {!demoMode && !config.contractAddress && (
+          {!demoActive && !config.contractAddress && (
             <span className="hint">Set VITE_CONTRACT_ADDRESS to point at a deployment.</span>
           )}
         </div>

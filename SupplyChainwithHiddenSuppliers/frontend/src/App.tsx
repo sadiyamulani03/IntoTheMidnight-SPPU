@@ -96,7 +96,11 @@ function applyDemoPublish(ledger: PublicLedger, p: DemoPublish): PublicLedger {
 export default function App() {
   const netConfig = getConfig();
   const wallet = useMidnight();
-  const demoMode = netConfig.demoMode && !netConfig.contractAddress;
+  const autoDemo = netConfig.demoMode && !netConfig.contractAddress;
+  // Runtime toggle overrides the env default, so the seeded coffee ledger is
+  // reachable even from the hosted build (no VITE_DEMO_MODE needed).
+  const [demoOverride, setDemoOverride] = useState<boolean | null>(null);
+  const demoMode = demoOverride ?? autoDemo;
 
   const [load, setLoad] = useState<LoadState>({ status: 'loading' });
   const [address, setAddress] = useState(netConfig.contractAddress);
@@ -154,6 +158,22 @@ export default function App() {
             </span>
           </a>
           <div className="topbar-spacer" />
+          <div className="seg-control" title="Source of the ledger on this page">
+            <button
+              className={`seg-button ${demoMode ? 'seg-on' : ''}`}
+              onClick={() => setDemoOverride(true)}
+              disabled={demoMode}
+            >
+              Demo
+            </button>
+            <button
+              className={`seg-button ${!demoMode ? 'seg-on' : ''}`}
+              onClick={() => setDemoOverride(false)}
+              disabled={!demoMode}
+            >
+              Live
+            </button>
+          </div>
           <span className="status-pill" title="Indexer connection">
             <span className={`live-dot ${connectionOk ? 'on' : load.status === 'loading' ? 'busy' : 'off'}`} />
             {demoMode
@@ -197,7 +217,7 @@ export default function App() {
       </section>
 
       <main className="page">
-        <ProveActions wallet={wallet} config={netConfig} products={products} onDemoPublished={onDemoPublished} />
+        <ProveActions wallet={wallet} config={netConfig} products={products} demoMode={demoMode} onDemoPublished={onDemoPublished} />
 
         <section className="panel">
           <div className="panel-head">
