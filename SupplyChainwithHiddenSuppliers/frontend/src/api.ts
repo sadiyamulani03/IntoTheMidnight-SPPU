@@ -53,7 +53,7 @@ export function getConfig(): DashboardConfig {
     indexerUrl:
       import.meta.env.VITE_INDEXER_URL ??
       import.meta.env.VITE_MIDNIGHT_INDEXER_URL ??
-      'https://indexer.preview.midnight.network',
+      'https://indexer.preview.midnight.network/api/v4/graphql',
     contractAddress:
       import.meta.env.VITE_CONTRACT_ADDRESS ??
       import.meta.env.VITE_MIDNIGHT_CONTRACT_ADDRESS ??
