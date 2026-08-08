@@ -19,13 +19,15 @@ export function ConsumerVerify({ products }: { products: ProductClaim[] }) {
   return (
     <div className="panel">
       <div className="panel-head">
-        <h2>Consumer verification</h2>
-        <span className="privacy-tag">QR flow — Proved without revealing your input</span>
+        <h2>
+          <span className="panel-kicker">QR flow</span>
+          Consumer verification
+        </h2>
+        <span className="privacy-tag">Proved without revealing your input</span>
       </div>
       <p className="muted">
-        Enter a product ID to see the verified statements a consumer gets when scanning
-        the product QR code. Only proven claims are shown — supplier identities, prices
-        and routes stay private.
+        A consumer scans the pack QR and sees <em>only</em> these proven statements — never the
+        supplier identities, prices or routes behind them.
       </p>
       <div className="verify-search">
         <input
@@ -33,15 +35,16 @@ export function ConsumerVerify({ products }: { products: ProductClaim[] }) {
           onChange={(e) => setQ(e.target.value)}
           placeholder="e.g. PROD-CHAINSHIELD-01"
           spellCheck={false}
+          aria-label="Product ID to verify"
         />
-        {q.trim() && !found && <p className="error">No product matches "{q}".</p>}
       </div>
-      {found && (
-        <div className="verify-result">
+      {q.trim() && !found && <p className="error">No product matches "{q}".</p>}
+      {q.trim() && found && (
+        <div className="verify-result" key={found.productId}>
           <div className="verify-meta">
             <strong>{found.productId}</strong>
-            <span className="muted">batch {found.batchId} · quantity {found.quantity.toString()}</span>
-            <span className={`badge badge-stage stage-${found.stage}`}>{STAGES[found.stage]}</span>
+            <span className="muted">batch {found.batchId} · {found.quantity.toString()} units</span>
+            <span className="badge badge-stage">{stageLabel(found.stage)}</span>
           </div>
           <VerifierStatements product={found} />
         </div>
@@ -50,4 +53,6 @@ export function ConsumerVerify({ products }: { products: ProductClaim[] }) {
   );
 }
 
-const STAGES: Record<number, string> = { 1: 'MANUFACTURED', 2: 'IN_TRANSIT', 3: 'DELIVERED' };
+function stageLabel(stage: number): string {
+  return { 1: 'MANUFACTURED', 2: 'IN_TRANSIT', 3: 'DELIVERED' }[stage] ?? 'UNKNOWN';
+}

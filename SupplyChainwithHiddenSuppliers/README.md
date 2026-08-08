@@ -152,6 +152,25 @@ npm run frontend:dev             # http://localhost:5173
 npm run frontend:build           # production build (zero errors)
 ```
 
+**Local proof relay (recommended, no browser extension needed):** the faster,
+privacy-tightest path for the *Prove & publish* flow runs the zero-knowledge
+proofs against the local devnet in a Node relay, so the browser never touches
+private supplier data — the witness is built server-side and dropped immediately.
+
+```bash
+# one terminal: keep the devnet from step 2 running, then
+npm run relay                   # http://127.0.0.1:8787
+# frontend/.env.local already sets:
+#   VITE_ENABLE_PROVE=true
+#   VITE_RELAY_URL=http://127.0.0.1:8787
+npm run frontend:dev
+```
+
+The relay exposes `/health` and `/api/{register,recertify,fair-pricing,ship,deliver,withdraw}`;
+requests carry only public claim inputs, and each response returns only the public
+transaction id and block. The private supplier witness (`pricePaid`) is generated
+inside the relay per proof and dropped after proving.
+
 **Deploy to the public Preview network** (requires a funded wallet):
 
 ```bash

@@ -35,12 +35,12 @@ export function VerifierStatements({ product }: { product: ProductClaim }) {
   return (
     <div className="verifier">
       <div className="verifier-head">
-        <span className="verifier-title">Verified statements</span>
+        <span className="verifier-title">Zero-knowledge verified statements</span>
         <span className="privacy-tag">Proved without revealing your input</span>
       </div>
-<ul className="verifier-list">
+      <ul className="verifier-list">
         {stmts.map((s) => (
-          <li key={s.label} className={vez(s.ok)}>
+          <li key={s.label} className={`verifier-item ${s.ok ? 'ok' : 'no'}`}>
             <span className="vhook">{s.ok ? '✓' : '✕'}</span>
             <span>{s.label}</span>
             {s.hint && <span className="muted verifier-hint">{s.hint}</span>}
@@ -49,8 +49,4 @@ export function VerifierStatements({ product }: { product: ProductClaim }) {
       </ul>
     </div>
   );
-}
-
-function vez(ok: boolean) {
-  return `verifier-item ${ok ? 'ok' : 'no'}`;
 }

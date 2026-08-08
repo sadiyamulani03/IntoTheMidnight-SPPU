@@ -3,9 +3,9 @@
  *
  * Each action generates a ZERO-KNOWLEDGE proof about a product and publishes
  * only the *claim* on chain. The underlying supplier witness (identities,
- * certs, prices, routes) is built locally (lib/witness.ts), fed into the
- * circuit for the proof, and dropped immediately — it is never rendered, kept
- * in React state, persisted, or logged.
+ * certs, prices, routes) is built either by the local proof RELAY (server-side,
+ * dropped immediately) or in-browser via the connector — it is never rendered,
+ * kept in React state, persisted, or logged.
  *
  * Public form inputs:
  *   productId / batchId / quantity / quantityDelivered / floor / minExpiryYear
@@ -15,11 +15,13 @@
  *
  * Every submit is labelled: "Proved without revealing your input."
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { UseMidnightReturn } from '../hooks/useMidnight';
 import { buildSupplierWitness } from '../lib/witness';
 import { submitCircuit, type CircuitKind, type ProveOutcome } from '../lib/prove';
+import { callRelay, relayHealth, type RelayCircuit } from '../lib/relay';
 import type { ChainShieldEnv } from '../lib/networks';
+import type { ProductClaim } from '../api';
 
 type Wire =
   | 'registerProduct'
@@ -38,7 +40,21 @@ const CIRCUITS: { kind: Wire; label: string; desc: string; ownerOnly?: boolean }
   { kind: 'withdrawClaim', label: 'Withdraw claim', desc: 'Owner-only; removes a claim — ownership proven in ZK.', ownerOnly: true },
 ];
 
+const RELAY_CIRCUIT: Record<CircuitKind, RelayCircuit> = {
+  registerProduct: 'register',
+  recertifyProduct: 'recertify',
+  proveFairPricing: 'fair-pricing',
+  shipProduct: 'ship',
+  deliverProduct: 'deliver',
+  withdrawClaim: 'withdraw',
+};
+
 const PRIVATE_STATE_ID = 'supplyChainPrivateState';
+const CLAIM_TOGGLES: { key: 'certified' | 'ethical' | 'routes'; label: string }[] = [
+  { key: 'certified', label: 'every supplier certified' },
+  { key: 'ethical', label: 'ethically sourced' },
+  { key: 'routes', label: 'routes compliant' },
+];
 
 interface FlowForm {
   productId: string;
@@ -52,10 +68,19 @@ interface FlowForm {
   routes: boolean;
 }
 
-export function ProveActions({ wallet, config }: { wallet: UseMidnightReturn; config: ChainShieldEnv }) {
+export function ProveActions({
+  wallet,
+  config,
+  products,
+}: {
+  wallet: UseMidnightReturn;
+  config: ChainShieldEnv;
+  products: ProductClaim[];
+}) {
   const [active, setActive] = useState<Wire>('registerProduct');
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<ProveOutcome | null>(null);
+  const [relayOk, setRelayOk] = useState<boolean | null>(null);
   const [form, setForm] = useState<FlowForm>({
     productId: 'PROD-A1',
     batchId: 'BATCH-001',
@@ -71,15 +96,26 @@ export function ProveActions({ wallet, config }: { wallet: UseMidnightReturn; co
   const patch = (p: Partial<FlowForm>) => setForm((f) => ({ ...f, ...p }));
   const connected = wallet.state.status === 'connected' && !!wallet.address;
 
+  useEffect(() => {
+    let alive = true;
+    relayHealth(config.relayUrl).then((ok) => alive && setRelayOk(ok)).catch(() => alive && setRelayOk(false));
+    return () => { alive = false; };
+  }, [config.relayUrl]);
+
   if (!config.enableProve) {
     return (
       <div className="panel">
-        <h2>Prove &amp; publish Zero-Knowledge claims</h2>
+        <div className="panel-head">
+          <h2>
+            <span className="panel-kicker">Prove &amp; publish</span>
+            Zero-knowledge claims
+          </h2>
+        </div>
         <p className="hint">
-          Wallet publishing is disabled in this build. To activate it, install the Midnight
-          Wallet extension, fund it on <strong>Preview</strong>, and set{' '}
-          <code>VITE_ENABLE_PROVE=true</code> in <code>.env.local</code>. Reading the
-          public certification ledger below still works.
+          Wallet publishing is disabled in this build. To activate it, set{' '}
+          <code>VITE_ENABLE_PROVE=true</code> in <code>frontend/.env.local</code> (and run{' '}
+          <code>npm run relay</code> for the local proof relay). Reading the public certification
+          ledger below still works.
         </p>
       </div>
     );
@@ -120,18 +156,40 @@ export function ProveActions({ wallet, config }: { wallet: UseMidnightReturn; co
     }
 
     try {
-      const outcomeOf = wallet.connector
-        ? await submitCircuit(
-            wallet.connector,
-            config.contractAddress,
-            PRIVATE_STATE_ID,
-            active as CircuitKind,
-            pubArgs,
-            suppliers,
-          )
-        : { ok: false as const, message: 'Wallet not connected.' };
+      // Privacy contract: private `suppliers` never leaves this function for the
+      // wire. The local relay builds the witness and runs the proof server-side.
+      let outcomeOf: ProveOutcome;
+      if (!wallet.connector) {
+        const result = await callRelay(config.relayUrl, RELAY_CIRCUIT[active as CircuitKind], {
+          productId: form.productId,
+          batchId: form.batchId,
+          quantity: form.quantity,
+          quantityDelivered: form.quantityDelivered,
+          fairFloor: form.floor,
+          minExpiryYear: form.minExpiryYear,
+          certified: form.certified,
+          ethical: form.ethical,
+          routes: form.routes,
+        });
+        outcomeOf = result.ok
+          ? {
+              ok: true,
+              circuit: active,
+              txId: result.txId ?? '',
+              blockHeight: BigInt(result.blockHeight ?? '0'),
+            }
+          : { ok: false, message: result.message ?? 'Relay declined the request.' };
+      } else {
+        outcomeOf = await submitCircuit(
+          wallet.connector,
+          config.contractAddress,
+          PRIVATE_STATE_ID,
+          active as CircuitKind,
+          pubArgs,
+          suppliers,
+        );
+      }
 
-      // Privacy contract: `suppliers` goes out of scope here; never log it.
       setOutcome(outcomeOf);
     } catch (err) {
       setOutcome({ ok: false, message: err instanceof Error ? err.message : String(err) });
@@ -143,108 +201,142 @@ export function ProveActions({ wallet, config }: { wallet: UseMidnightReturn; co
   return (
     <div className="panel">
       <div className="panel-head">
-        <h2>Prove &amp; publish a claim</h2>
+        <h2>
+          <span className="panel-kicker">Zero-knowledge</span>
+          Prove &amp; publish a claim
+        </h2>
         <span className="privacy-tag">Proved without revealing your input</span>
       </div>
 
-      <p className="muted">
-        Each action creates a <strong>zero-knowledge proof</strong> from the private
-        supplier list and publishes only the disclosed claim. Supplier identities,
-        certificates, prices and routes never render, are never stored, and are dropped
-        the moment the proof is produced.
-      </p>
+      <div className="prove-stack">
+        <p className="muted">
+          Each action creates a <strong>zero-knowledge proof</strong> from the private supplier
+          list and publishes only the disclosed claim. Identities, certificates, prices and routes
+          are dropped the instant a proof is produced.
+        </p>
 
-      {outcome?.ok === false && outcome.message && <p className="error">{outcome.message}</p>}
+        <div className="status-pill" style={{ alignSelf: 'flex-start' }}>
+          <span className={`live-dot ${relayOk === null ? 'busy' : relayOk ? 'on' : 'off'}`} />
+          {relayOk === null
+            ? 'Checking proof relay…'
+            : relayOk
+              ? 'Proof relay online'
+              : `Proof relay offline at ${config.relayUrl}/health`}
+        </div>
 
-      <div className="circuit-grid">
-        {CIRCUITS.map((c) => (
-          <button
-            key={c.kind}
-            className={`circuit-card ${active === c.kind ? 'active' : ''}`}
-            onClick={() => setActive(c.kind)}
-            disabled={busy}
-          >
-            <strong>{c.label}</strong>
-            <span>{c.desc}</span>
-            {c.ownerOnly && <em className="owner-tag">owner only</em>}
-          </button>
-        ))}
-      </div>
+        {outcome?.ok === false && outcome.message && <p className="error">{outcome.message}</p>}
 
-      <div className="form-grid">
-        {active !== 'proveFairPricing' && (
-          <Field label="Product ID">
-            <input value={form.productId} onChange={(e) => patch({ productId: e.target.value })} spellCheck={false} />
-          </Field>
-        )}
-        {active === 'registerProduct' && (
-          <>
-            <Field label="Batch ID">
-              <input value={form.batchId} onChange={(e) => patch({ batchId: e.target.value })} spellCheck={false} />
-            </Field>
-            <Field label="Quantity (units)">
-              <input value={form.quantity} onChange={(e) => patch({ quantity: e.target.value })} />
-            </Field>
-          </>
-        )}
-        {active === 'recertifyProduct' && (
-          <Field label="Minimum certificate expiry (year)">
-            <input value={form.minExpiryYear} onChange={(e) => patch({ minExpiryYear: e.target.value })} />
-          </Field>
-        )}
-        {active === 'proveFairPricing' && (
-          <>
+        <div className="circuit-grid">
+          {CIRCUITS.map((c) => (
+            <button
+              key={c.kind}
+              className={`circuit-card ${active === c.kind ? 'active' : ''}`}
+              onClick={() => setActive(c.kind)}
+              disabled={busy}
+            >
+              <strong>{c.label}</strong>
+              <span>{c.desc}</span>
+              {c.ownerOnly && <em className="owner-tag">owner only</em>}
+            </button>
+          ))}
+        </div>
+
+        <div className="form-grid">
+          {active !== 'proveFairPricing' && (
             <Field label="Product ID">
               <input value={form.productId} onChange={(e) => patch({ productId: e.target.value })} spellCheck={false} />
             </Field>
-            <Field label="Fair-trade floor (public)">
-              <input value={form.floor} onChange={(e) => patch({ floor: e.target.value })} />
+          )}
+          {active === 'registerProduct' && (
+            <>
+              <Field label="Batch ID">
+                <input value={form.batchId} onChange={(e) => patch({ batchId: e.target.value })} spellCheck={false} />
+              </Field>
+              <Field label="Quantity (units)">
+                <input value={form.quantity} onChange={(e) => patch({ quantity: e.target.value })} />
+              </Field>
+            </>
+          )}
+          {active === 'recertifyProduct' && (
+            <Field label="Minimum certificate expiry (year)">
+              <input value={form.minExpiryYear} onChange={(e) => patch({ minExpiryYear: e.target.value })} />
             </Field>
-          </>
-        )}
-        {active === 'deliverProduct' && (
-          <Field label="Quantity delivered">
-            <input value={form.quantityDelivered} onChange={(e) => patch({ quantityDelivered: e.target.value })} />
-          </Field>
-        )}
-      </div>
-
-      <div className="claim-flags">
-        <span className="muted">These claim booleans are published; the underlying supplier records stay private.</span>
-        <label>
-          <input type="checkbox" checked={form.certified} onChange={(e) => patch({ certified: e.target.checked })} /> every supplier certified
-        </label>
-        <label>
-          <input type="checkbox" checked={form.ethical} onChange={(e) => patch({ ethical: e.target.checked })} /> ethically sourced
-        </label>
-        <label>
-          <input type="checkbox" checked={form.routes} onChange={(e) => patch({ routes: e.target.checked })} /> routes compliant
-        </label>
-      </div>
-
-      <div className="action-row">
-        <button
-          className="btn btn-primary"
-          disabled={!connected || busy || !config.contractAddress}
-          onClick={() => void run()}
-        >
-          {busy ? 'Proving…' : 'Prove & publish'}
-        </button>
-        {!connected && <span className="hint">Connect a wallet to publish a proof.</span>}
-        {!config.contractAddress && <span className="hint">Set VITE_CONTRACT_ADDRESS to point at a deployment.</span>}
-      </div>
-
-      {busy && (
-        <p className="hint">⏳ Generating the zero-knowledge proof… The private supplier list is not shown or stored anywhere.</p>
-      )}
-      {outcome?.ok === true && (
-        <div className="success">
-          <p><strong>Proved without revealing your input.</strong> Claim published on-chain.</p>
-          <p className="hint">
-            Tx ID <code>{outcome.txId}</code> · block {outcome.blockHeight.toString()}
-          </p>
+          )}
+          {active === 'proveFairPricing' && (
+            <>
+              <Field label="Product ID">
+                <input value={form.productId} onChange={(e) => patch({ productId: e.target.value })} spellCheck={false} />
+              </Field>
+              <Field label="Fair-trade floor (public)">
+                <input value={form.floor} onChange={(e) => patch({ floor: e.target.value })} />
+              </Field>
+            </>
+          )}
+          {active === 'deliverProduct' && (
+            <Field label="Quantity delivered">
+              <input value={form.quantityDelivered} onChange={(e) => patch({ quantityDelivered: e.target.value })} />
+            </Field>
+          )}
         </div>
-      )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span className="muted" style={{ fontSize: 12.5 }}>
+            These claim booleans are published; the underlying supplier records stay private.
+          </span>
+          <div className="toggle-row">
+            {CLAIM_TOGGLES.map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                className={`toggle-pill ${form[t.key] ? 'on' : ''}`}
+                onClick={() => patch({ [t.key]: !form[t.key] })}
+              >
+                {form[t.key] ? '✓ ' : '✕ '}
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="submit-row">
+          <button
+            className="btn-base btn-primary"
+            disabled={!connected || busy || !config.contractAddress}
+            onClick={() => void run()}
+          >
+            {busy ? 'Proving…' : 'Prove & publish'}
+          </button>
+          {busy && (
+            <span className="proof-status">
+              <span className="prove-spinner" />
+              generating zero-knowledge proof — private data never leaves the relay
+            </span>
+          )}
+          {!connected && !busy && <span className="hint">Connect a wallet to authenticate the publish.</span>}
+          {!config.contractAddress && <span className="hint">Set VITE_CONTRACT_ADDRESS to point at a deployment.</span>}
+        </div>
+
+        {outcome?.ok === true && (
+          <div className="outcome-box ok">
+            <span>
+              <strong>Publish confirmed.</strong> Proved without revealing your input — claim is on-chain.
+            </span>
+            <span>
+              Circuit <code>{outcome.circuit}</code> · Tx ID <code>{outcome.txId}</code> · block{' '}
+              <code>{outcome.blockHeight.toString()}</code>
+            </span>
+          </div>
+        )}
+
+        {products.length > 0 && (
+          <div className="prove-note">
+            <b>On-chain products:</b>{' '}
+            {products.slice(0, 6).map((p) => p.productId).join(', ')}
+            {products.length > 6 ? ` +${products.length - 6} more` : ''} — pick an ID above to link a
+            new proof to an existing record.
+          </div>
+        )}
+      </div>
     </div>
   );
 }

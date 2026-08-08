@@ -1,32 +1,60 @@
 /**
- * useMidnight — DApp Connector wallet integration.
+ * useMidnight — DApp Connector wallet integration (CAIP-372).
  *
- * The Midnight **wallet browser extension** injects a connector API at
- * `window.midnight`. Crucially, we never hardcode a wallet name / id: we
- * enumerate `Object.values(window.midnight)` and use the first *enabled*
- * entry. A wallet on the **Preview** network exposes an unshielded address and
- * the ability to prove + submit Midnight circuit calls.
+ * The Midnight **wallet browser extension** injects a connector under
+ * `window.midnight.<id>`. Two generations of the DApp-connector API exist and
+ * we support BOTH:
  *
- * The connector subset typed here follows the Midnight reference connector
- * (`react-wallet-connector` docs + the `1am-wallet` browser demo). It is used
- * for B1: discovering the wallet, connecting, reading the unshielded address,
- * validating the network, and disconnecting — with clear error states for
- * "not installed", "rejected", and "network mismatch".
+ *   - v1 (CAIP-372, what 1AM/Lace inject today): the entry exposes
+ *     `connect(networkId)`, `name`, `icon`, `apiVersion`, `rdns`.
+ *   - legacy (older `react-wallet-connector`): the entry exposes
+ *     `wallet.connect()`.
  *
- * PRIVACY CONTRACT: this hook only ever touches public wallet concerns (the
- * unshielded address and network id). Supplier witness inputs NEVER enter this
- * hook, React state, or any persisted store.
+ * Crucially we never hardcode a wallet name / id: we enumerate
+ * `Object.values(window.midnight)`, match a connectable entry, and poll until
+ * the extension injects it (extensions load asynchronously, AFTER
+ * DOMContentLoaded — a naive boot-time check always reports "not found").
+ *
+ * Only public wallet concerns are read here (the unshielded address and network
+ * id). PRIVACY CONTRACT: supplier witness inputs never enter this hook.
  */
 import { useCallback, useState } from 'react';
 import { getConfig, networkLabel, type NetworkId } from '../lib/networks';
 
-/** A wallet app entry injected by an enabling wallet under `window.midnight`. */
-export interface DAppConnectorEntry {
+/** v1 / CAIP-372 connector entry (as injected by 1AM, etc.). */
+export interface DAppConnectorV1 {
+  rdns?: string;
+  name?: string;
+  icon?: string;
+  /** e.g. "4.0.1"; used for feature detection, not gating. */
   apiVersion?: string;
+  connect?: (networkId?: string) => Promise<MidnightConnectorWallet>;
+}
+
+/** Legacy entry shape (older `react-wallet-connector`). */
+export interface DAppConnectorLegacy {
   isEnabled?: boolean;
   wallet?: {
     connect?: () => Promise<MidnightConnectorWallet>;
   };
+}
+
+export type DAppConnectorEntry = DAppConnectorV1 & DAppConnectorLegacy;
+
+/**
+ * Do the busy-work of discovering a connectable wallet entry. Accepts both the
+ * v1 `connect(networkId)` entry and the legacy `wallet.connect()` entry.
+ */
+function findConnector(
+  midnight: Record<string, DAppConnectorEntry>,
+): { app: DAppConnectorEntry; kind: 'v1' | 'legacy' } | undefined {
+  const apps = Object.values(midnight);
+  // v1 first (the shape 1AM injects today), then legacy.
+  const v1 = apps.find((e) => typeof e?.connect === 'function');
+  if (v1) return { app: v1, kind: 'v1' };
+  const legacy = apps.find((e) => typeof e?.wallet?.connect === 'function');
+  if (legacy) return { app: legacy, kind: 'legacy' };
+  return undefined;
 }
 
 /**
@@ -61,6 +89,9 @@ interface MidnightWindow {
   midnight?: Record<string, DAppConnectorEntry>;
 }
 
+const POLL_INTERVAL_MS = 300;
+const POLL_TIMEOUT_MS = 6000;
+
 export interface UseMidnightReturn {
   state: WalletConnectState;
   connect: () => Promise<void>;
@@ -83,28 +114,34 @@ export function useMidnight(): UseMidnightReturn {
 
   const connect = useCallback(async () => {
     const win = window as unknown as MidnightWindow;
-    if (!win.midnight) {
-      setState({ status: 'error', message: 'Midnight wallet extension not installed. Install the Midnight Wallet and refresh the page.' });
-      return;
+
+    // Extensions inject ASYNCHRONOUSLY, after DOMContentLoaded. Poll briefly so
+    // the commonly-raced "boot-time check finds nothing" failure never happens.
+    const startedAt = Date.now();
+    let found: { app: DAppConnectorEntry; kind: 'v1' | 'legacy' } | undefined;
+    while (!found) {
+      const m = win.midnight;
+      if (m && typeof m === 'object') found = findConnector(m);
+      if (found) break;
+      if (Date.now() - startedAt >= POLL_TIMEOUT_MS) break;
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
     }
-    if (Object.keys(win.midnight).length === 0) {
-      setState({ status: 'error', message: 'Midnight Wallet was detected but is not running on this page. Reload and enable it.' });
-      return;
-    }
-    const apps = Object.values(win.midnight);
-    // The wallet extension is present, so prefer an entry whose `isEnabled` is
-    // already true, but DO NOT require it — most DApp connectors mark the app
-    // enabled only after the first, so we fall back to any entry with `connect`.
-    const candidates = apps.filter((entry) => entry?.wallet && typeof entry?.wallet?.connect === 'function');
-    const app = candidates.find((entry) => entry?.isEnabled === true) ?? candidates[0];
-    if (!app) {
-      setState({ status: 'error', message: 'No Midnight wallet found on this page. If the Midnight Wallet extension is installed, reload the page, then grant "Midnight" access when prompted.' });
+
+    if (!found) {
+      setState({ status: 'error', message: 'Midnight wallet not detected. Install the Midnight Wallet (e.g. 1AM) — or if installed, reload the page and grant "Midnight" access.' });
       return;
     }
 
     setState({ status: 'connecting' });
     try {
-      const connected = (await app.wallet!.connect!()) as MidnightConnectorWallet | undefined;
+      let connected: MidnightConnectorWallet | undefined;
+      if (found.kind === 'v1') {
+        // v1 / CAIP-372: pass the target network id and await authorization.
+        connected = await found.app.connect?.(network);
+      } else {
+        connected = (await found.app.wallet?.connect?.()) as MidnightConnectorWallet | undefined;
+      }
+
       if (!connected) {
         setState({ status: 'error', message: 'The wallet did not return a session. Your wallet may need to be unlocked — open it and retry.' });
         return;
@@ -126,7 +163,8 @@ export function useMidnight(): UseMidnightReturn {
 
       let addr: string | undefined;
       if (typeof connected.getUnshieldedAddress === 'function') {
-        addr = await connected.getUnshieldedAddress();
+        const raw = await connected.getUnshieldedAddress();
+        addr = typeof raw === 'string' ? raw : raw != null ? String(raw) : undefined;
         setAddress(addr);
       } else {
         setAddress(undefined);

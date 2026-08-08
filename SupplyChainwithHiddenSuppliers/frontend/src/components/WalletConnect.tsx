@@ -2,7 +2,7 @@
  * WalletConnect — connect / disconnect the Midnight DApp Connector wallet.
  *
  * Renders:
- *  - a network badge (e.g. "Preview") and the connected public address,
+ *  - a network badge (e.g. "Devnet") and the connected public address,
  *  - a Connect / Disconnect button,
  *  - the relevant error states: wallet not installed, connect rejected, and
  *    network mismatch (surfaced from the hook, never fabricating data).
@@ -39,11 +39,11 @@ export function WalletConnect({ wallet }: { wallet: UseMidnightReturn }) {
           <span className="muted">Not connected</span>
         )}
         {connected ? (
-          <button className="btn btn-ghost" onClick={() => void wallet.disconnect()}>
+          <button className="btn-base btn-ghost" onClick={() => void wallet.disconnect()}>
             Disconnect
           </button>
         ) : (
-          <button className="btn btn-primary" disabled={connecting} onClick={() => void wallet.connect()}>
+          <button className="btn-base btn-primary" disabled={connecting} onClick={() => void wallet.connect()}>
             {connecting ? 'Connecting…' : 'Connect wallet'}
           </button>
         )}
@@ -51,12 +51,13 @@ export function WalletConnect({ wallet }: { wallet: UseMidnightReturn }) {
 
       {state.status === 'error' && state.message && <p className="error">{state.message}</p>}
       {state.status === 'disconnected' && (
-        <p className="hint">Wallet disconnected. Reconnect to publish Zero-Knowledge claims.</p>
+        <p className="wallet-status-text">Wallet disconnected. Reconnect to publish Zero-Knowledge claims.</p>
       )}
     </div>
   );
 }
 
-function shortAddress(addr: string): string {
+export function shortAddress(addr: string): string {
+  if (typeof addr !== 'string' || addr.length === 0) return 'connected';
   return addr.length > 18 ? `${addr.slice(0, 10)}…${addr.slice(-6)}` : addr;
 }

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { fetchPublicState, CLAIM_LABELS, STAGES, type ProductClaim, type PublicLedger } from './api';
+import { fetchPublicState, CLAIM_LABELS, type ProductClaim, type PublicLedger } from './api';
 import { getConfig } from './lib/networks';
 import { useMidnight } from './hooks/useMidnight';
-import { WalletConnect } from './components/WalletConnect';
+import { WalletConnect, NetworkBadge, shortAddress } from './components/WalletConnect';
 import { ProveActions } from './components/ProveActions';
 import { LedgerOverview } from './components/LedgerOverview';
 import { ConsumerVerify } from './components/ConsumerVerify';
@@ -14,89 +14,7 @@ type LoadState =
   | { status: 'empty' }
   | { status: 'error'; message: string };
 
-const BOOL: Record<string, string> = { true: '✔', false: '✖' };
-
-function ClaimBadge({ ok }: { ok: boolean }) {
-  return <span className={`badge ${ok ? 'badge-ok' : 'badge-no'}`}>{BOOL[String(ok)]}</span>;
-}
-
-function StageBar({ stage }: { stage: number }) {
-  const steps = [1, 2, 3] as const;
-  return (
-    <div className="stage-bar">
-      {steps.map((step) => (
-        <div key={step} className={`stage-step ${stage >= step ? 'stage-on' : ''}`}>
-          <span className="stage-dot" />
-          <span className="stage-name">{STAGES[step]}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function ScoreBar({ score }: { score: number }) {
-  const tone = score >= 100 ? 'score-full' : score >= 60 ? 'score-mid' : 'score-low';
-  return (
-    <div className="score-row">
-      <span className="muted">Compliance score</span>
-      <div className="score-track">
-        <div className={`score-fill ${tone}`} style={{ width: `${Math.min(score, 100)}%` }} />
-      </div>
-      <strong className="score-value">{score}/100</strong>
-    </div>
-  );
-}
-
-function ProductRow({ product }: { product: ProductClaim }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="product-card">
-      <button className="product-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-        <span className="product-id">{product.productId}</span>
-        <span className="audits">re-audits on chain: {product.auditCount}</span>
-        <span className="toggle">{open ? '▴' : '▾'}</span>
-      </button>
-      <div className="product-meta">
-        <span className="muted">batch:</span> <code>{product.batchId}</code>
-        <span className="muted"> · quantity:</span> {product.quantity.toString()} units
-      </div>
-      <StageBar stage={product.stage} />
-      <ScoreBar score={product.complianceScore} />
-      <div className="product-claims">
-        <div className="claim"><ClaimBadge ok={product.isEthical} /><span>{CLAIM_LABELS.isEthical}</span></div>
-        <div className="claim">
-          <ClaimBadge ok={product.allCertified} />
-          <span>{CLAIM_LABELS.allCertified}</span>
-          <span className="muted">({product.certifiedCount} of 8 suppliers certified — count only, identities never revealed)</span>
-        </div>
-        <div className="claim"><ClaimBadge ok={product.allRoutesCompliant} /><span>{CLAIM_LABELS.allRoutesCompliant}</span></div>
-        <div className="claim">
-          <ClaimBadge ok={product.fairPricing} />
-          <span>{CLAIM_LABELS.fairPricing}</span>
-          <span className="muted">(fair-trade floor: {product.fairFloor.toString()} — actual prices stay private)</span>
-        </div>
-      </div>
-      {open && <VerifierStatements product={product} />}
-    </div>
-  );
-}
-
-function Stats({ products }: { products: ProductClaim[] }) {
-  const total = products.length;
-  const delivered = products.filter((p) => p.stage >= 3).length;
-  const inTransit = products.filter((p) => p.stage === 2).length;
-  const avgScore = total === 0 ? 0 : Math.round(products.reduce((s, p) => s + p.complianceScore, 0) / total);
-  const fullyCompliant = products.filter((p) => p.complianceScore >= 100).length;
-  return (
-    <div className="stats">
-      <div className="stat"><span className="stat-num">{total}</span><span className="stat-label">products</span></div>
-      <div className="stat"><span className="stat-num">{delivered}</span><span className="stat-label">delivered</span></div>
-      <div className="stat"><span className="stat-num">{inTransit}</span><span className="stat-label">in transit</span></div>
-      <div className="stat"><span className="stat-num">{fullyCompliant}/{total}</span><span className="stat-label">100% compliant</span></div>
-      <div className="stat"><span className="stat-num">{avgScore}</span><span className="stat-label">avg score</span></div>
-    </div>
-  );
-}
+const STAGE_SHORT: Record<number, string> = { 1: 'MANUFACTURED', 2: 'IN_TRANSIT', 3: 'DELIVERED' };
 
 export default function App() {
   const netConfig = getConfig();
@@ -105,6 +23,7 @@ export default function App() {
   const [load, setLoad] = useState<LoadState>({ status: 'loading' });
   const [address, setAddress] = useState(netConfig.contractAddress);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [live, setLive] = useState(true);
 
   const loadState = useCallback(async () => {
     if (!address.trim()) { setLoad({ status: 'empty' }); return; }
@@ -119,75 +38,345 @@ export default function App() {
 
   useEffect(() => { void loadState(); }, [loadState, refreshKey]);
 
+  // Live auto-refresh of the public ledger (read-only).
+  useEffect(() => {
+    if (!live) return;
+    const id = setInterval(() => { void loadState(); }, 15000);
+    return () => clearInterval(id);
+  }, [live, loadState]);
+
+  const products = load.status === 'ready' ? load.ledger.products : [];
+  const connectionOk = load.status === 'ready';
+
   return (
-    <div className="page">
-      <header className="hero">
-        <div className="hero-top">
-          <h1>ChainShield</h1>
+    <>
+      <header className="topbar">
+        <div className="topbar-inner">
+          <a className="brand" href="#">
+            <span className="brand-mark">✦</span>
+            <span className="brand-name">
+              ChainShield
+              <small>Hidden suppliers · Midnight</small>
+            </span>
+          </a>
+          <div className="topbar-spacer" />
+          <span className="status-pill" title="Indexer connection">
+            <span className={`live-dot ${connectionOk ? 'on' : load.status === 'loading' ? 'busy' : 'off'}`} />
+            {connectionOk ? 'Ledger live' : load.status === 'loading' ? 'Reading ledger…' : 'Ledger offline'}
+          </span>
           <WalletConnect wallet={wallet} />
         </div>
-        <p className="tagline">
-          A privacy-first supply chain on <strong>Midnight</strong>. Every product below carries{' '}
-          <em>zero-knowledge proven</em> claims — ethical sourcing, certification, fair pricing and a
-          verifiable <strong>MANUFACTURED → IN_TRANSIT → DELIVERED</strong> lifecycle — while the
-          underlying supplier records stay private.
-        </p>
-        <p className="privacy-note">Proved without revealing your input.</p>
       </header>
 
-      <ProveActions wallet={wallet} config={netConfig} />
-
-      <section className="panel">
-        <div className="panel-head">
-          <h2>Public certification ledger</h2>
-          <span className="privacy-tag">readable by anyone — private data never leaves the wallet</span>
-        </div>
-        <label className="field">
-          <span>Contract address</span>
-          <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Contract ID (from .midnight-state.json / .env)" spellCheck={false} />
-        </label>
-        <button onClick={() => setRefreshKey((k) => k + 1)} disabled={!address.trim()}>Refresh</button>
-        <p className="hint">
-          Network: <strong>{netConfig.network}</strong> · Indexer: <code>{netConfig.indexerUrl}</code>
+      <section className="hero">
+        <span className="hero-eyebrow">✦ Zero-knowledge supply chain</span>
+        <h1>
+          Ethical sourcing, <span className="grad">proven blind.</span>
+        </h1>
+        <p className="hero-sub">
+          Every product below carries <strong>zero-knowledge proven</strong> claims — every supplier
+          certified, ethically sourced, fair-trade priced — across a verifiable{' '}
+          <strong>MANUFACTURED → IN_TRANSIT → DELIVERED</strong> lifecycle. The underlying supplier
+          identities, certificates, prices and routes <strong>never leave a wallet</strong>.
         </p>
-        {load.status === 'loading' && <p className="muted">Decoding on-chain state…</p>}
-        {load.status === 'error' && <p className="error">Failed to read state: {load.message}</p>}
-        {load.status === 'empty' && <p className="muted">Enter a deployed contract address above, or run <code>npm run setup</code> first.</p>}
-        {load.status === 'ready' && load.ledger.products.length === 0 && (
-          <p className="muted">Contract is deployed but no products are registered yet.</p>
-        )}
-        {load.status === 'ready' && load.ledger.products.length > 0 && (
-          <>
-            <Stats products={load.ledger.products} />
-            <LedgerOverview products={load.ledger.products} />
-            <div className="products">
-              {load.ledger.products.map((p) => <ProductRow key={p.productId} product={p} />)}
-            </div>
-            <p className="hint">Company authority key: <code>{load.ledger.authority}</code></p>
-          </>
-        )}
+        <div className="hero-cta">
+          <span className="chip"><b>{products.length}</b> product{(products.length === 1 ? '' : 's')} on ledger</span>
+          <span className="chip"><b>{STAGE_SHORT[1]}</b> · <b>{STAGE_SHORT[2]}</b> · <b>{STAGE_SHORT[3]}</b></span>
+          <span className="chip">
+            <NetworkBadge label={wallet.networkLabel} />
+          </span>
+          {wallet.address && <span className="chip">wallet <b>{shortAddress(wallet.address)}</b></span>}
+        </div>
       </section>
 
-      <ConsumerVerify products={load.status === 'ready' ? load.ledger.products : []} />
+      <main className="page">
+        <ProveActions wallet={wallet} config={netConfig} products={products} />
 
-      <section className="panel privacy">
-        <div className="panel-head">
-          <h2>How privacy works</h2>
-          <span className="privacy-tag">selective disclosure</span>
+        <section className="panel">
+          <div className="panel-head">
+            <h2>
+              <span className="panel-kicker">Public certification ledger</span>
+              Readable by anyone
+            </h2>
+            <span className="privacy-tag">private data never leaves the wallet</span>
+          </div>
+
+          <div className="ledger-actions">
+            <div className="field">
+              <span>Contract address</span>
+              <input
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                placeholder="Contract ID (from .midnight-state.json / .env)"
+                spellCheck={false}
+                style={{ fontFamily: 'var(--mono)', fontSize: 12.5 }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button className="btn-base" onClick={() => setRefreshKey((k) => k + 1)} disabled={!address.trim()}>
+                Refresh
+              </button>
+              <button className={`toggle-pill ${live ? 'on' : ''}`} onClick={() => setLive((l) => !l)}>
+                {live ? 'auto-refresh on' : 'auto-refresh off'}
+              </button>
+            </div>
+          </div>
+
+          <p className="hint" style={{ fontSize: 12.5 }}>
+            Network: <strong>{netConfig.network}</strong> · Indexer:{' '}
+            <code>{netConfig.indexerUrl}</code>
+          </p>
+
+          {load.status === 'loading' && (
+            <div className="loading-row">
+              <span className="prove-spinner" />
+              Decoding on-chain state…
+            </div>
+          )}
+          {load.status === 'error' && <p className="error">Failed to read state: {load.message}</p>}
+          {load.status === 'empty' && (
+            <p className="muted">
+              Enter a deployed contract address above, or run <code>npm run setup</code> first.
+            </p>
+          )}
+          {connectionOk && products.length === 0 && (
+            <p className="muted">Contract is deployed but no products are registered yet.</p>
+          )}
+          {connectionOk && products.length > 0 && (
+            <>
+              <KpiDashboard products={products} />
+              <LedgerOverview products={products} />
+              <div className="products">
+                {products.map((p) => <ProductRow key={p.productId} product={p} />)}
+              </div>
+              <p className="hint" style={{ marginTop: 16, fontSize: 12.5 }}>
+                Company authority key: <code>{load.status === 'ready' ? load.ledger.authority : ''}</code>
+              </p>
+            </>
+          )}
+        </section>
+
+        <ConsumerVerify products={products} />
+
+        <PrivacyExplainer />
+      </main>
+
+      <footer className="footer">
+        <div className="foot-mark">✦ ChainShield</div>
+        <div>
+          <b>Supply Chain with Hidden Suppliers</b> — a Midnight Network ZK dApp. Public claims and
+          counts are on-chain; identities, certifications, prices and routes exist only inside proofs.
         </div>
-        <p>Instead of revealing the fact, ChainShield publishes a <strong>proof of the fact</strong>:</p>
-        <ul className="zk-examples">
-          <li><span className="reveal">Supplier: ABC Cotton Ltd · Maharashtra · ₹12,50,000</span> → <strong>✓ Supplier is government certified</strong></li>
-          <li><span className="reveal">Transport temperature: 3.4°C</span> → <strong>✓ Temperature remained within the required range</strong></li>
-          <li><span className="reveal">Factory: XYZ Manufacturing</span> → <strong>✓ Product manufactured by an approved facility</strong></li>
-        </ul>
-        <p>Only the following cross the proof boundary:</p>
+      </footer>
+    </>
+  );
+}
+
+/* ---------------------------------------------------------------------------
+   KPI dashboard
+--------------------------------------------------------------------------- */
+function KpiDashboard({ products }: { products: ProductClaim[] }) {
+  const total = products.length;
+  const delivered = products.filter((p) => p.stage >= 3).length;
+  const inTransit = products.filter((p) => p.stage === 2).length;
+  const avg = total === 0 ? 0 : Math.round(products.reduce((s, p) => s + p.complianceScore, 0) / total);
+  const certified = products.filter((p) => p.allCertified).length;
+  const fair = products.filter((p) => p.fairPricing).length;
+  const fully = products.filter((p) => p.complianceScore >= 100).length;
+
+  return (
+    <div className="kpis">
+      <div className="kpi brand-tone">
+        <div className="kpi-value">{total}</div>
+        <div className="kpi-label">Products on ledger</div>
+        <div className="kpi-sub">{delivered} delivered · {inTransit} in transit</div>
+      </div>
+      <div className="kpi ok-tone">
+        <div className="kpi-value">{certified}/{total}</div>
+        <div className="kpi-label">All suppliers certified</div>
+        <div className="mini-bar"><i style={{ width: `${total ? (certified / total) * 100 : 0}%` }} /></div>
+      </div>
+      <div className="kpi warn-tone">
+        <div className="kpi-value">{fair}/{total}</div>
+        <div className="kpi-label">Fair-pricing proven</div>
+        <div className="mini-bar"><i style={{ width: `${total ? (fair / total) * 100 : 0}%` }} /></div>
+      </div>
+      <div className="kpi">
+        <div className="kpi-value">{fully}<span style={{ fontSize: 16, color: 'var(--muted)' }}>/{total}</span></div>
+        <div className="kpi-label">100% compliant</div>
+        <div className="kpi-sub">avg compliance score {avg}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------------
+   Product card
+--------------------------------------------------------------------------- */
+function ClaimBadge({ ok }: { ok: boolean }) {
+  return <span className={`badge ${ok ? 'badge-ok' : 'badge-no'}`}>{ok ? '✓' : '✕'}</span>;
+}
+
+function ProductRow({ product }: { product: ProductClaim }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={`product-card ${open ? 'open' : ''}`}>
+      <button className="product-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        <span className="product-id">{product.productId}</span>
+        <span className="brand-mark" style={{ width: 26, height: 26, fontSize: 14 }}>✦</span>
+        <span className="product-top-meta">
+          <span className="badge badge-stage">{STAGE_SHORT[product.stage]}</span>
+          <span className="muted">{product.auditCount} re-audit{product.auditCount === 1 ? '' : 's'}</span>
+          <span className="toggle">▾</span>
+        </span>
+      </button>
+      <div className="product-body">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div className="quick-stats">
+            <div className="quick-stat"><div className="q-num">{product.complianceScore}/100</div><div className="q-label">Compliance</div></div>
+            <div className="quick-stat"><div className="q-num">{product.quantity.toString()}</div><div className="q-label">Units</div></div>
+            <div className="quick-stat"><div className="q-num">{product.certifiedCount}</div><div className="q-label">Certified / 8</div></div>
+          </div>
+          <StageBar stage={product.stage} />
+          <ScoreBar score={product.complianceScore} />
+          <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>
+            Batch <code>{product.batchId}</code> · fair-trade floor{' '}
+            <code>{product.fairFloor.toString()}</code> (actual prices stay private)
+          </p>
+        </div>
+
+        <div>
+          <div className="product-claims">
+            {[
+              { ok: product.isEthical, label: CLAIM_LABELS.isEthical },
+              { ok: product.allCertified, label: CLAIM_LABELS.allCertified },
+              { ok: product.allRoutesCompliant, label: CLAIM_LABELS.allRoutesCompliant },
+              { ok: product.fairPricing, label: CLAIM_LABELS.fairPricing },
+            ].map((c) => (
+              <div key={c.label} className="claim">
+                <ClaimBadge ok={c.ok} />
+                <span>{c.label}</span>
+              </div>
+            ))}
+          </div>
+
+          {open && (
+            <>
+              <VerifierStatements product={product} />
+              <p className="claim-reveal">
+                <span className="live-dot on" />
+                <span>
+                  Supplier identities, certificate numbers, prices paid and transport routes are
+                  hidden — proved in zero-knowledge, never published.
+                </span>
+              </p>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StageBar({ stage }: { stage: number }) {
+  const steps = [1, 2, 3] as const;
+  return (
+    <div className="stage-bar">
+      {steps.map((step) => (
+        <div key={step} className={`stage-step ${stage >= step ? 'stage-on' : ''}`}>
+          <span className="stage-dot" />
+          <span className="stage-name">{STAGE_SHORT[step]}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ScoreBar({ score }: { score: number }) {
+  const tone = score >= 100 ? 'score-full' : score >= 60 ? 'score-mid' : 'score-low';
+  return (
+    <div className="score-row">
+      <span className="muted" style={{ fontSize: 12.5 }}>Compliance</span>
+      <div className="score-track">
+        <div className={`score-fill ${tone}`} style={{ width: `${Math.min(score, 100)}%` }} />
+      </div>
+      <span className="score-value">{score}</span>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------------
+   Privacy explainer
+--------------------------------------------------------------------------- */
+function PrivacyExplainer() {
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <h2>
+          <span className="panel-kicker">Selective disclosure</span>
+          How privacy works
+        </h2>
+        <span className="privacy-tag">ZK proof, not data</span>
+      </div>
+      <p>
+        Instead of revealing the fact, ChainShield publishes a <strong>proof of the fact</strong>.
+      </p>
+      <ul className="zk-examples">
+        <li>
+          <span className="reveal">Supplier: ABC Cotton Ltd · Maharashtra · cert A-2214</span>
+          <span className="arr">→</span>
+          <strong>✓ Supplier is government certified</strong>
+        </li>
+        <li>
+          <span className="reveal">Transport temperature: 3.4°C</span>
+          <span className="arr">→</span>
+          <strong>✓ Temperature remained within the required range</strong>
+        </li>
+        <li>
+          <span className="reveal">Price paid: ₹1,250,000</span>
+          <span className="arr">→</span>
+          <strong>✓ Fair-trade price ≥ public floor</strong>
+        </li>
+      </ul>
+
+      <div className="privacy-flow">
+        <div className="privacy-step">
+          <div className="step-num">STEP 01</div>
+          <h3>Witness in the wallet</h3>
+          <p>
+            Supplier identities, certs, expiries, prices and routes live only inside the wallet /
+            relay, generated at proof time.
+          </p>
+        </div>
+        <div className="privacy-step">
+          <div className="step-num">STEP 02</div>
+          <h3>Zero-knowledge proof</h3>
+          <p>
+            A circuit proves a property — "all 26 suppliers are certified" — without revealing who
+            they are or what they were paid.
+          </p>
+        </div>
+        <div className="privacy-step">
+          <div className="step-num">STEP 03</div>
+          <h3>Claim only on chain</h3>
+          <p>
+            Booleans, the certified count and a committed floor cross the boundary — and can be
+            verified by anyone.
+          </p>
+        </div>
+      </div>
+
+      <div className="boundary-box">
+        <strong>Only these cross the proof boundary:</strong>
         <ul>
           <li>Claim booleans, the <code>certifiedCount</code> aggregate, the committed <code>fairFloor</code></li>
           <li>Lifecycle stage, <code>auditCount</code>, derived compliance score</li>
         </ul>
-        <p className="muted">Supplier identities, certificates + expiries, prices paid and routes never leave the wallet — they are generated at proof time, used for the zero-knowledge proof, and dropped.</p>
-      </section>
-    </div>
+        <p className="muted" style={{ margin: '10px 0 0', fontSize: 13 }}>
+          Supplier identities, certificate numbers + expiries, prices paid and routes never leave the
+          wallet — generated at proof time, used for the proof, and dropped.
+        </p>
+      </div>
+    </section>
   );
 }

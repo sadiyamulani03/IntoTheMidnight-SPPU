@@ -21,6 +21,8 @@ export interface ChainShieldEnv {
    * browser extension on the configured network. See the README.
    */
   enableProve: boolean;
+  /** Local wallet-relay endpoint that runs real proofs (see README / npm run relay). */
+  relayUrl: string;
 }
 
 /** Read the dashboard configuration from Vite env vars with safe defaults. */
@@ -37,6 +39,7 @@ export function getConfig(): ChainShieldEnv {
       import.meta.env.VITE_MIDNIGHT_CONTRACT_ADDRESS ??
       '',
     enableProve: toBoolean(import.meta.env.VITE_ENABLE_PROVE),
+    relayUrl: import.meta.env.VITE_RELAY_URL ?? 'http://127.0.0.1:8787',
   };
 }
 
