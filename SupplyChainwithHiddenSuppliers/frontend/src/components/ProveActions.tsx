@@ -158,8 +158,15 @@ export function ProveActions({
     try {
       // Privacy contract: private `suppliers` never leaves this function for the
       // wire. The local relay builds the witness and runs the proof server-side.
+      // We prefer the relay whenever it is up — most connectors (e.g. 1AM) do not
+      // expose a `getMidnightProviders` adapter, and the relay runs the SAME
+      // wallet/proof stack as the CLI. The in-browser connector path is only used
+      // when the wallet explicitly hands back a providers adapter.
       let outcomeOf: ProveOutcome;
-      if (!wallet.connector) {
+      const useBrowserProver = typeof wallet.connector?.getMidnightProviders === 'function';
+      const useRelay = relayOk !== false && !useBrowserProver;
+
+      if (useRelay) {
         const result = await callRelay(config.relayUrl, RELAY_CIRCUIT[active as CircuitKind], {
           productId: form.productId,
           batchId: form.batchId,
@@ -179,15 +186,20 @@ export function ProveActions({
               blockHeight: BigInt(result.blockHeight ?? '0'),
             }
           : { ok: false, message: result.message ?? 'Relay declined the request.' };
-      } else {
+      } else if (useBrowserProver) {
         outcomeOf = await submitCircuit(
-          wallet.connector,
+          wallet.connector!,
           config.contractAddress,
           PRIVATE_STATE_ID,
           active as CircuitKind,
           pubArgs,
           suppliers,
         );
+      } else {
+        outcomeOf = {
+          ok: false,
+          message: `No proof engine available — start the local proof relay (npm run relay) so ${config.relayUrl}/health is online.`,
+        };
       }
 
       setOutcome(outcomeOf);

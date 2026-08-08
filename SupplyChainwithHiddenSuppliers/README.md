@@ -171,6 +171,14 @@ requests carry only public claim inputs, and each response returns only the publ
 transaction id and block. The private supplier witness (`pricePaid`) is generated
 inside the relay per proof and dropped after proving.
 
+**Which prover is used in the dashboard:** the *Prove & publish* panel prefers the
+local relay whenever it is online, regardless of whether a browser wallet is
+connected — most connectors (e.g. **1AM**) do **not** expose a
+`getMidnightProviders` adapter, and the relay runs the same wallet + contract
+stack as the CLI. The in-browser connector prover is only used when the connected
+wallet explicitly hands back a providers adapter. If the relay is offline and no
+browser prover exists, the panel explains how to start it (`npm run relay`).
+
 **Deploy to the public Preview network** (requires a funded wallet):
 
 ```bash
