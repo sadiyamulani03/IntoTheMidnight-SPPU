@@ -73,6 +73,47 @@ commercial secrets behind them. `tests/privacy.test.ts` enforces this
 structurally: the compiled public `Ledger` type cannot carry any private supplier
 field, while the circuit input type proves those fields are real witnesses.
 
+### Compliance score — auditable, not cosmetic
+
+The `complianceScore` (0–100) is a **pure function of public claims**, computed
+inside the circuit (`scoreOf`) so the number is as unforgeable as the claims
+themselves:
+
+| Weight | Condition                                              |
+| ------ | ------------------------------------------------------ |
+| 30     | every supplier is certified (`allCertified`)           |
+| 30     | ethically sourced (`isEthical`)                        |
+| 20     | every logistics route compliant (`allRoutesCompliant`) |
+| 20     | fair pricing proven (`fairPricing`)                    |
+
+```text
+score = (allCertified ? 30 : 0) + (isEthical ? 30 : 0)
+      + (allRoutesCompliant ? 20 : 0) + (fairPricing ? 20 : 0)
+```
+
+The formula is part of the contract source (`contracts/supply-chain.compact`,
+`scoreOf`) and is compiled into the public circuit — anyone can verify the score
+from the four public booleans without trusting ChainShield. **Certificate
+decay:** `certExpiry` is a private witness; a *lapsed* certificate cannot be
+attested, so a product cannot ship, deliver or re-verify once any supplier's
+cert expires (`recertifyProduct` enforces `certExpiry ≥ minExpiry`). The public
+`auditCount` records how often claims were re-verified, giving a visible
+recency signal. *A time-based decay of the score itself is planned — see
+"Future Scope".*
+
+### Threat model — what an attacker can and cannot infer
+
+| Threat                              | Mitigation in ChainShield                                                                                       |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| **Relay compromise**                | The relay accepts **only public claim flags** — private witness values (`pricePaid`, `certExpiry`, identities) are derived inside the process, never accepted from the client, never logged, and buffer-zeroed after proving (`wipeSuppliers`). Worst case a compromised relay attests false claims it *itself* fabricates — it cannot exfiltrate data it never holds. |
+| **Malicious indexer / RPC**         | A hostile indexer sees only public `Ledger` state — booleans, `certifiedCount`, `fairFloor`, stage, timestamps. It cannot see identities, prices, routes or certificates, and the ZK proof itself proves the claims without revealing witnesses. |
+| **Timing/metadata side channel**    | The number and cadence of `register/ship/deliver` transactions is public by design on any ledger. Data *content* stays hidden; **volume/frequency** is not yet obfuscated. See "Future Scope" (commit-reveal + batching). |
+| **Fake claims (self-attestation)**  | Circuits are **fail-closed**: a proof asserting `certified=false`, an expired cert, an out-of-range price, a skipped stage (`DELIVERED` without `IN_TRANSIT`) or an unregistered product **fails** — enforced by `assert` gates, covered by `tests/adversarial.test.ts`. Today the supplier list is **self-attested**; third-party signed certificates are the roadmap priority ("Future Scope"). |
+| **Replay / tampered proof**         | Each claim is committed to the ledger; transitions require the exact prior `stage` (state machine), so a replayed or out-of-order proof cannot move a product out of sequence. |
+
+The relay privacy boundary and the fail-closed circuit gates are enforced
+automatically in `tests/adversarial.test.ts` (structural, deterministic).
+
 ## Key Features
 
 - **Six privacy-first Compact circuits** (`contracts/supply-chain.compact`):
@@ -100,15 +141,29 @@ field, while the circuit input type proves those fields are real witnesses.
 
 ## Future Scope
 
+> **Priority #1 — kill self-attestation:** today a company certifies its own
+> suppliers. The strongest version replaces that with **third-party certification
+> agencies** that cryptographically sign `certificateIssued` claims; the company's
+> circuit proves membership of that signed set without revealing which certs it
+> holds. Draft contract changes live in `docs/tier2-contract-draft.md`.
+
+- **Certification-agency circuits (Priority #1)** — agencies sign
+  `certificateIssued` claims; consumers verify "certified" without learning the
+  certificate number.
+- **QR-code consumer verification** — a public endpoint that resolves a product
+  ID to its proven claims for scanning at point of sale (dashboard already has
+  the in-page `ConsumerVerify` panel).
+- **Commit-reveal + batching for `ship`/`deliver`** — reduce the timing/frequency
+  side channel so business volume doesn't leak even though data content stays
+  hidden.
+- **Time-based compliance decay** — `complianceScore` currently resets on
+  re-verification; a decaying score (weight × `f(age of last audit)`) prevents
+  "certify once, coast forever".
 - **IoT temperature-compliance circuit** — a new `transportLog` circuit proving
   *"temperature stayed within range"* during cold-chain shipment without
   revealing the readings.
-- **Certification-agency circuits** — agencies sign `certificateIssued` claims;
-  consumers verify "certified" without learning the certificate number.
 - **Encrypted document storage** — off-chain (encrypted IPFS) for certificates,
   hashed into the on-chain claim.
-- **QR-code consumer verification** — a public endpoint that resolves a product
-  ID to its proven claims for scanning at point of sale.
 - **AI-based anomaly detection** — flag suspicious claim trajectories across the
   public ledger (without touching private data).
 - **Carbon-footprint and cross-border compliance** proofs.
@@ -128,6 +183,25 @@ field, while the circuit input type proves those fields are real witnesses.
 
 ## Local Development
 
+**Judge / reviewer shortcut — demo mode (no wallet, no docker):**
+
+```bash
+cd frontend
+cp .env.example .env.local       # demo mode is on and needs NO contract address
+npm install
+npm run dev                       # http://localhost:5173
+```
+
+With `VITE_DEMO_MODE=true` and an empty `VITE_CONTRACT_ADDRESS`, the dashboard
+renders a seeded single-origin-coffee ledger and every *Prove & publish* is
+simulated in-browser (proof history included) — zero funding, zero Preview
+wallet, zero proof relay. Any typed claim that would fail on-chain (e.g. the
+resulting demo Ledge with a <100 score) is visible immediately. To switch back
+to the real chain, set `VITE_CONTRACT_ADDRESS` (demo mode then turns itself
+off automatically).
+
+**Full local run (real proofs against the devnet):**
+
 **Requirements:** Node ≥ 22, npm, Docker with Compose, and the Midnight toolchain
 (`compact` on PATH or `npx @midnight-ntwrk/compact-toolchain`).
 
@@ -145,7 +219,7 @@ npm run compile
 # 4. Compile-check the TypeScript
 npm run build
 
-# 5. Run the offline test suite (52 tests, incl. "private inputs never exposed")
+# 5. Run the offline test suite (67 tests, incl. "private inputs never exposed")
 npm run test
 
 # 6. Deploy to the local devnet and record the address in .midnight-state.json
@@ -237,4 +311,14 @@ src/                               Deploy / CLI / network / wallet / providers (
 tests/                             Vitest suite incl. privacy (never-exposed) tests
 frontend/                          React + Vite dashboard (DApp Connector + indexer reads)
 compose.yml                        Local Midnight devnet stack
+docs/                              Architecture · Tier 2 draft · eval sheet · video storyboard
 ```
+
+## Companion docs
+
+| Doc                                              | Use when                               |
+| ------------------------------------------------ | -------------------------------------- |
+| `SupplyChainwithHiddenSuppliers/docs/architecture.md`          | Mermaid diagrams + threat boundary       |
+| `SupplyChainwithHiddenSuppliers/docs/eval-sheet.md`            | 60-second demo walkthrough for judges    |
+| `SupplyChainwithHiddenSuppliers/docs/demo-video-storyboard.md` | Recording the demo video                 |
+| `SupplyChainwithHiddenSuppliers/docs/tier2-contract-draft.md`  | Next-contract spec (agencies + QR)       |

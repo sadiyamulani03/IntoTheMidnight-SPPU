@@ -18,7 +18,7 @@ import { resolveNetwork, getOrCreateSeed, getDeployment } from './network';
 import { createWallet } from './wallet';
 import { buildContract } from './contract';
 import { deriveOwnerKey } from './keys';
-import { buildSuppliers } from './suppliers';
+import { buildSuppliers, wipeSuppliers } from './suppliers';
 import { createProviders } from './providers';
 import { findDeployedContract } from '@midnight-ntwrk/midnight-js-contracts';
 
@@ -60,8 +60,22 @@ async function boot() {
 }
 
 // ─── Private witness from PUBLIC claim flags ───────────────────────────────────
+//
+// PRIVACY INVARIANT: the relay NEVER accepts private witness data from the
+// client. The only fields read off the request are PUBLIC claim *flags*; every
+// private datum (identity, cert expiry, price paid, route) is derived inside
+// this process, used for the proof, and dropped. `pricePaid` in particular is
+// NOT an input to this server — it is a fixed constant below, so no client can
+// steer or observe it.
 
-interface ClaimFlags { certified?: boolean; ethical?: boolean; routes?: boolean; pricePaid?: number; }
+interface ClaimFlags { certified?: boolean; ethical?: boolean; routes?: boolean; }
+
+// Price paid to each supplier. Fixed server-side so the browser can never read
+// or influence it; the fair-pricing circuit merely proves `pricePaid >= floor`.
+const RELAY_PRICE_PAID = 150n;
+
+// Certificate expiry the relay asserts on every supplier (epoch seconds).
+const RELAY_CERT_EXPIRY = 2100n * 365n * 24n * 3600n;
 
 function witnessFor(flags: ClaimFlags) {
   // The PRIVATE supplier vector. Built here, consumed by the prover, dropped.
@@ -69,8 +83,8 @@ function witnessFor(flags: ClaimFlags) {
     certified: flags.certified ?? true,
     ethical: flags.ethical ?? true,
     routes: flags.routes ?? true,
-    certExpiry: 2100n * 365n * 24n * 3600n,
-    pricePaid: BigInt(flags.pricePaid ?? 150),
+    certExpiry: RELAY_CERT_EXPIRY,
+    pricePaid: RELAY_PRICE_PAID,
   });
 }
 
@@ -100,10 +114,11 @@ function readBody(req: any): Promise<any> {
   });
 }
 
-async function runCircuit(circuit: string, args: unknown[]) {
+async function runCircuit(circuit: string, args: unknown[], witness?: ReturnType<typeof witnessFor>) {
   const start = Date.now();
   const tx = await deployed.callTx[circuit](...args);
   const ms = Date.now() - start;
+  if (witness) wipeSuppliers(witness);
   return { txId: tx.public.txId, blockHeight: String(tx.public.blockHeight), provingMs: ms };
 }
 
@@ -121,34 +136,39 @@ const server = createServer(async (req, res) => {
     if (path === '/api/register' && req.method === 'POST') {
       const b = await readBody(req);
       const q = BigInt(b.quantity ?? 0);
-      const tx = await runCircuit('registerProduct', [String(b.productId), String(b.batchId), q, witnessFor(b)]);
+      const w = witnessFor(b);
+      const tx = await runCircuit('registerProduct', [String(b.productId), String(b.batchId), q, w], w);
       return json(res, 200, { ok: true, ...tx });
     }
 
     if (path === '/api/recertify' && req.method === 'POST') {
       const b = await readBody(req);
       const minExpiry = BigInt(b.minExpiryYear ?? 2030) * 365n * 24n * 3600n;
-      const tx = await runCircuit('recertifyProduct', [String(b.productId), minExpiry, witnessFor(b)]);
+      const w = witnessFor(b);
+      const tx = await runCircuit('recertifyProduct', [String(b.productId), minExpiry, w], w);
       return json(res, 200, { ok: true, ...tx });
     }
 
     if (path === '/api/fair-pricing' && req.method === 'POST') {
       const b = await readBody(req);
       const floor = BigInt(b.fairFloor ?? 0);
-      const tx = await runCircuit('proveFairPricing', [String(b.productId), floor, witnessFor(b)]);
+      const w = witnessFor(b);
+      const tx = await runCircuit('proveFairPricing', [String(b.productId), floor, w], w);
       return json(res, 200, { ok: true, ...tx });
     }
 
     if (path === '/api/ship' && req.method === 'POST') {
       const b = await readBody(req);
-      const tx = await runCircuit('shipProduct', [String(b.productId), witnessFor(b)]);
+      const w = witnessFor(b);
+      const tx = await runCircuit('shipProduct', [String(b.productId), w], w);
       return json(res, 200, { ok: true, ...tx });
     }
 
     if (path === '/api/deliver' && req.method === 'POST') {
       const b = await readBody(req);
       const q = BigInt(b.quantityDelivered ?? 0);
-      const tx = await runCircuit('deliverProduct', [String(b.productId), q, witnessFor(b)]);
+      const w = witnessFor(b);
+      const tx = await runCircuit('deliverProduct', [String(b.productId), q, w], w);
       return json(res, 200, { ok: true, ...tx });
     }
 

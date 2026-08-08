@@ -23,6 +23,13 @@ export interface ChainShieldEnv {
   enableProve: boolean;
   /** Local wallet-relay endpoint that runs real proofs (see README / npm run relay). */
   relayUrl: string;
+  /**
+   * When `true` (and no contract address is configured), the dashboard renders
+   * a realistic seeded demo ledger and a simulated prove flow so the full
+   * product can be clicked through with NO wallet, NO tNIGHT and NO relay.
+   * Pure front-end: nothing is written to any chain.
+   */
+  demoMode: boolean;
 }
 
 /** Read the dashboard configuration from Vite env vars with safe defaults. */
@@ -40,6 +47,7 @@ export function getConfig(): ChainShieldEnv {
       '',
     enableProve: toBoolean(import.meta.env.VITE_ENABLE_PROVE),
     relayUrl: import.meta.env.VITE_RELAY_URL ?? 'http://127.0.0.1:8787',
+    demoMode: toBoolean(import.meta.env.VITE_DEMO_MODE),
   };
 }
 

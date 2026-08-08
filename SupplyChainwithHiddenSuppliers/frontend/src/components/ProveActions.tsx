@@ -31,6 +31,18 @@ type Wire =
   | 'deliverProduct'
   | 'withdrawClaim';
 
+/** A simulated publish in demo mode — lets judges click through with no wallet. */
+export interface DemoPublish {
+  circuit: Wire;
+  productId: string;
+  batchId?: string;
+  quantity?: string;
+  floor?: string;
+  certified: boolean;
+  ethical: boolean;
+  routes: boolean;
+}
+
 const CIRCUITS: { kind: Wire; label: string; desc: string; ownerOnly?: boolean }[] = [
   { kind: 'registerProduct', label: 'Register product', desc: 'MANUFACTURED — every supplier certified, ethical, routes compliant.' },
   { kind: 'recertifyProduct', label: 'Re-certify', desc: 'Re-prove claims + no lapsed certs; bumps the on-chain audit.' },
@@ -72,10 +84,12 @@ export function ProveActions({
   wallet,
   config,
   products,
+  onDemoPublished,
 }: {
   wallet: UseMidnightReturn;
   config: ChainShieldEnv;
   products: ProductClaim[];
+  onDemoPublished?: (p: DemoPublish) => void;
 }) {
   const [active, setActive] = useState<Wire>('registerProduct');
   const [busy, setBusy] = useState(false);
@@ -95,14 +109,17 @@ export function ProveActions({
 
   const patch = (p: Partial<FlowForm>) => setForm((f) => ({ ...f, ...p }));
   const connected = wallet.state.status === 'connected' && !!wallet.address;
+  const demoMode = config.demoMode && !config.contractAddress;
+  const proveEnabled = config.enableProve || demoMode;
 
   useEffect(() => {
+    if (demoMode) { setRelayOk(null); return; }
     let alive = true;
     relayHealth(config.relayUrl).then((ok) => alive && setRelayOk(ok)).catch(() => alive && setRelayOk(false));
     return () => { alive = false; };
-  }, [config.relayUrl]);
+  }, [config.relayUrl, demoMode]);
 
-  if (!config.enableProve) {
+  if (!proveEnabled) {
     return (
       <div className="panel">
         <div className="panel-head">
@@ -124,6 +141,30 @@ export function ProveActions({
   const run = async () => {
     setBusy(true);
     setOutcome(null);
+
+    if (demoMode) {
+      // Simulated prove: short delay, then reflect the publish in the demo ledger.
+      await new Promise((r) => setTimeout(r, 600));
+      onDemoPublished?.({
+        circuit: active,
+        productId: form.productId,
+        batchId: form.batchId,
+        quantity: form.quantity,
+        floor: form.floor,
+        certified: form.certified,
+        ethical: form.ethical,
+        routes: form.routes,
+      });
+      setOutcome({
+        ok: true,
+        circuit: active,
+        txId: `DEMO-${Date.now().toString(16)}`,
+        blockHeight: BigInt(Math.floor(Date.now() / 3000)),
+      });
+      setBusy(false);
+      return;
+    }
+
     // PRIVATE witness: built here, consumed by the prover, never stored/logged.
     const suppliers = buildSupplierWitness({
       certified: form.certified,
@@ -228,12 +269,14 @@ export function ProveActions({
         </p>
 
         <div className="status-pill" style={{ alignSelf: 'flex-start' }}>
-          <span className={`live-dot ${relayOk === null ? 'busy' : relayOk ? 'on' : 'off'}`} />
-          {relayOk === null
-            ? 'Checking proof relay…'
-            : relayOk
-              ? 'Proof relay online'
-              : `Proof relay offline at ${config.relayUrl}/health`}
+          <span className={`live-dot ${demoMode ? 'on' : relayOk === null ? 'busy' : relayOk ? 'on' : 'off'}`} />
+          {demoMode
+            ? 'Simulated proof engine (demo)'
+            : relayOk === null
+              ? 'Checking proof relay…'
+              : relayOk
+                ? 'Proof relay online'
+                : `Proof relay offline at ${config.relayUrl}/health`}
         </div>
 
         {outcome?.ok === false && outcome.message && <p className="error">{outcome.message}</p>}
@@ -313,19 +356,25 @@ export function ProveActions({
         <div className="submit-row">
           <button
             className="btn-base btn-primary"
-            disabled={!connected || busy || !config.contractAddress}
+            disabled={busy || (!demoMode && (!connected || !config.contractAddress))}
             onClick={() => void run()}
           >
-            {busy ? 'Proving…' : 'Prove & publish'}
+            {busy ? 'Proving…' : demoMode ? 'Prove & publish (demo)' : 'Prove & publish'}
           </button>
           {busy && (
             <span className="proof-status">
               <span className="prove-spinner" />
-              generating zero-knowledge proof — private data never leaves the relay
+              {demoMode
+                ? 'simulating a proof — private suppliers stay out of the UI'
+                : 'generating zero-knowledge proof — private data never leaves the relay'}
             </span>
           )}
-          {!connected && !busy && <span className="hint">Connect a wallet to authenticate the publish.</span>}
-          {!config.contractAddress && <span className="hint">Set VITE_CONTRACT_ADDRESS to point at a deployment.</span>}
+          {!demoMode && !connected && !busy && (
+            <span className="hint">Connect a wallet to authenticate the publish.</span>
+          )}
+          {!demoMode && !config.contractAddress && (
+            <span className="hint">Set VITE_CONTRACT_ADDRESS to point at a deployment.</span>
+          )}
         </div>
 
         {outcome?.ok === true && (

@@ -51,3 +51,19 @@ export function buildSuppliers(opts: BuildSuppliersOptions): SupplierWitness[] {
   }
   return suppliers;
 }
+
+/**
+ * Best-effort zeroing of private witness memory after a proof. Fills every
+ * `identityHash` buffer with zeroes in place so a heap snapshot / core dump
+ * taken after proving cannot recover the hashes. This is a hardening step, not
+ * a cryptographic guarantee (the runtime may have copied the values elsewhere);
+ * it must be paired with "never log the witness" — enforced by the privacy
+ * tests.
+ */
+export function wipeSuppliers(suppliers: SupplierWitness[]): void {
+  for (const s of suppliers) {
+    s.identityHash.fill(0);
+    s.certExpiry = 0n;
+    s.pricePaid = 0n;
+  }
+}

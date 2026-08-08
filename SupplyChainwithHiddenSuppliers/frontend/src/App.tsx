@@ -3,10 +3,11 @@ import { fetchPublicState, CLAIM_LABELS, type ProductClaim, type PublicLedger } 
 import { getConfig } from './lib/networks';
 import { useMidnight } from './hooks/useMidnight';
 import { WalletConnect, NetworkBadge, shortAddress } from './components/WalletConnect';
-import { ProveActions } from './components/ProveActions';
+import { ProveActions, type DemoPublish } from './components/ProveActions';
 import { LedgerOverview } from './components/LedgerOverview';
 import { ConsumerVerify } from './components/ConsumerVerify';
 import { VerifierStatements } from './components/VerifierStatements';
+import { demoLedger, demoProofHistory, type DemoProofEvent } from './lib/demo';
 
 type LoadState =
   | { status: 'loading' }
@@ -16,9 +17,86 @@ type LoadState =
 
 const STAGE_SHORT: Record<number, string> = { 1: 'MANUFACTURED', 2: 'IN_TRANSIT', 3: 'DELIVERED' };
 
+const DEMO_SEED = 'demo-seed';
+
+/** Recompose the compliance score from the four public claims (mirror of `scoreOf`). */
+export function scoreFromClaims(c: {
+  allCertified: boolean;
+  isEthical: boolean;
+  allRoutesCompliant: boolean;
+  fairPricing: boolean;
+}): number {
+  return (
+    (c.allCertified ? 30 : 0) +
+    (c.isEthical ? 30 : 0) +
+    (c.allRoutesCompliant ? 20 : 0) +
+    (c.fairPricing ? 20 : 0)
+  );
+}
+
+/** Apply a simulated publish to the in-memory demo ledger (front-end only). */
+function applyDemoPublish(ledger: PublicLedger, p: DemoPublish): PublicLedger {
+  let products = [...ledger.products];
+  const existing = (id: string) => products.find((x) => x.productId === id);
+
+  switch (p.circuit) {
+    case 'registerProduct': {
+      if (existing(p.productId)) break;
+      products = [
+        {
+          productId: p.productId,
+          batchId: p.batchId ?? 'N/A',
+          quantity: BigInt(p.quantity || '0'),
+          stage: 1,
+          isEthical: p.ethical,
+          allCertified: p.certified,
+          certifiedCount: p.certified ? 8 : 0,
+          allRoutesCompliant: p.routes,
+          fairFloor: BigInt(p.floor || '0'),
+          fairPricing: false,
+          auditCount: 0,
+          complianceScore: scoreFromClaims({
+            allCertified: p.certified,
+            isEthical: p.ethical,
+            allRoutesCompliant: p.routes,
+            fairPricing: false,
+          }),
+        },
+        ...products,
+      ];
+      break;
+    }
+    case 'recertifyProduct':
+      products = products.map((x) =>
+        x.productId === p.productId ? { ...x, auditCount: x.auditCount + 1, allCertified: p.certified } : x,
+      );
+      break;
+    case 'proveFairPricing':
+      products = products.map((x) =>
+        x.productId === p.productId
+          ? { ...x, fairPricing: true, fairFloor: BigInt(p.floor || '0'), complianceScore: scoreFromClaims(x) }
+          : x,
+      );
+      break;
+    case 'shipProduct':
+      products = products.map((x) => (x.productId === p.productId && x.stage < 2 ? { ...x, stage: 2 } : x));
+      break;
+    case 'deliverProduct':
+      products = products.map((x) =>
+        x.productId === p.productId && x.stage >= 2 && x.stage < 3 ? { ...x, stage: 3, auditCount: x.auditCount + 1 } : x,
+      );
+      break;
+    case 'withdrawClaim':
+      products = products.filter((x) => x.productId !== p.productId);
+      break;
+  }
+  return { ...ledger, products };
+}
+
 export default function App() {
   const netConfig = getConfig();
   const wallet = useMidnight();
+  const demoMode = netConfig.demoMode && !netConfig.contractAddress;
 
   const [load, setLoad] = useState<LoadState>({ status: 'loading' });
   const [address, setAddress] = useState(netConfig.contractAddress);
@@ -26,6 +104,14 @@ export default function App() {
   const [live, setLive] = useState(true);
 
   const loadState = useCallback(async () => {
+    if (demoMode) {
+      setLoad((current) =>
+        current.status === 'ready' && current.ledger.rawState === DEMO_SEED
+          ? current
+          : { status: 'ready', ledger: demoLedger() },
+      );
+      return;
+    }
     if (!address.trim()) { setLoad({ status: 'empty' }); return; }
     setLoad({ status: 'loading' });
     try {
@@ -34,16 +120,24 @@ export default function App() {
     } catch (err) {
       setLoad({ status: 'error', message: err instanceof Error ? err.message : String(err) });
     }
-  }, [address, netConfig.indexerUrl]);
+  }, [demoMode, address, netConfig.indexerUrl]);
 
   useEffect(() => { void loadState(); }, [loadState, refreshKey]);
 
-  // Live auto-refresh of the public ledger (read-only).
+  // Live auto-refresh of the public ledger (read-only). Skipped in demo mode —
+  // the seeded ledger only changes when a simulated publish lands.
   useEffect(() => {
-    if (!live) return;
+    if (!live || demoMode) return;
     const id = setInterval(() => { void loadState(); }, 15000);
     return () => clearInterval(id);
-  }, [live, loadState]);
+  }, [live, demoMode, loadState]);
+
+  const onDemoPublished = useCallback((p: DemoPublish) => {
+    setLoad((current) => {
+      const base = current.status === 'ready' ? current.ledger : demoLedger();
+      return { status: 'ready', ledger: applyDemoPublish(base, p) };
+    });
+  }, []);
 
   const products = load.status === 'ready' ? load.ledger.products : [];
   const connectionOk = load.status === 'ready';
@@ -62,11 +156,24 @@ export default function App() {
           <div className="topbar-spacer" />
           <span className="status-pill" title="Indexer connection">
             <span className={`live-dot ${connectionOk ? 'on' : load.status === 'loading' ? 'busy' : 'off'}`} />
-            {connectionOk ? 'Ledger live' : load.status === 'loading' ? 'Reading ledger…' : 'Ledger offline'}
+            {demoMode
+              ? 'Demo ledger'
+              : connectionOk
+                ? 'Ledger live'
+                : load.status === 'loading'
+                  ? 'Reading ledger…'
+                  : 'Ledger offline'}
           </span>
           <WalletConnect wallet={wallet} />
         </div>
       </header>
+
+      {demoMode && (
+        <div className="demo-banner">
+          <b>Demo mode</b> — no wallet, no tNIGHT, no relay required. The ledger below is a seeded
+          example and every “Prove &amp; publish” is simulated in-browser.
+        </div>
+      )}
 
       <section className="hero">
         <span className="hero-eyebrow">✦ Zero-knowledge supply chain</span>
@@ -90,7 +197,7 @@ export default function App() {
       </section>
 
       <main className="page">
-        <ProveActions wallet={wallet} config={netConfig} products={products} />
+        <ProveActions wallet={wallet} config={netConfig} products={products} onDemoPublished={onDemoPublished} />
 
         <section className="panel">
           <div className="panel-head">
@@ -147,7 +254,7 @@ export default function App() {
               <KpiDashboard products={products} />
               <LedgerOverview products={products} />
               <div className="products">
-                {products.map((p) => <ProductRow key={p.productId} product={p} />)}
+                {products.map((p) => <ProductRow key={p.productId} product={p} showTimeline={demoMode} />)}
               </div>
               <p className="hint" style={{ marginTop: 16, fontSize: 12.5 }}>
                 Company authority key: <code>{load.status === 'ready' ? load.ledger.authority : ''}</code>
@@ -217,8 +324,9 @@ function ClaimBadge({ ok }: { ok: boolean }) {
   return <span className={`badge ${ok ? 'badge-ok' : 'badge-no'}`}>{ok ? '✓' : '✕'}</span>;
 }
 
-function ProductRow({ product }: { product: ProductClaim }) {
+function ProductRow({ product, showTimeline = false }: { product: ProductClaim; showTimeline?: boolean }) {
   const [open, setOpen] = useState(false);
+  const history: DemoProofEvent[] = showTimeline ? demoProofHistory(product.productId) : [];
   return (
     <div className={`product-card ${open ? 'open' : ''}`}>
       <button className="product-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
@@ -243,6 +351,7 @@ function ProductRow({ product }: { product: ProductClaim }) {
             Batch <code>{product.batchId}</code> · fair-trade floor{' '}
             <code>{product.fairFloor.toString()}</code> (actual prices stay private)
           </p>
+          {history.length > 0 && <ProofTimeline events={history} />}
         </div>
 
         <div>
@@ -301,6 +410,28 @@ function ScoreBar({ score }: { score: number }) {
         <div className={`score-fill ${tone}`} style={{ width: `${Math.min(score, 100)}%` }} />
       </div>
       <span className="score-value">{score}</span>
+    </div>
+  );
+}
+
+function ProofTimeline({ events }: { events: DemoProofEvent[] }) {
+  return (
+    <div className="proof-timeline">
+      <div className="timeline-title">proof history</div>
+      <ol className="timeline-list">
+        {events.map((e, i) => (
+          <li key={`${e.circuit}-${i}`}>
+            <span className="tl-dot" />
+            <span className="tl-body">
+              <span className="tl-row">
+                <strong className="tl-circuit">{e.circuit}</strong>
+                <span className="tl-at">{e.at}</span>
+              </span>
+              <span className="tl-summary">{e.summary}</span>
+            </span>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }
