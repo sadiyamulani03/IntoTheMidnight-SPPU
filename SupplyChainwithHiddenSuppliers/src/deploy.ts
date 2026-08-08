@@ -12,6 +12,7 @@ import { buildContract } from './contract';
 import { createProviders } from './providers';
 import { WebSocket } from 'ws';
 import * as Rx from 'rxjs';
+import { inspect } from 'node:util';
 
 // Midnight SDK imports
 import { deployContract } from '@midnight-ntwrk/midnight-js-contracts';
@@ -56,6 +57,30 @@ async function waitForProofServer(maxAttempts = 60, delayMs = 2000): Promise<boo
 // is also passed to the constructor. The key is private witness data — it is
 // used to build proofs only and is never disclosed on chain.
 const ownerKey = deriveOwnerKey(SEED);
+
+// Retry a transaction submission until it succeeds or the retry budget is
+// exhausted. The preview/preprod RPC nodes occasionally close the websocket
+// mid-subscription, which surfaces as a SubmissionError wrapping a
+// "disconnected" error several causes deep. Submission must simply be
+// attempted again.
+async function submitWithRetry(fn: () => Promise<unknown>, label: string, maxAttempts = 10): Promise<void> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await fn();
+      return;
+    } catch (err: any) {
+      const full = inspect(err, { depth: null });
+      const transient =
+        /disconnected|connect ECONNREFUSED|NetworkError|network error|timeout|interrupted|connection.*closed|normal closure|submission error/i.test(full) &&
+        !/bad|invalid|rejected|reverted|Dust|dust|bandwidth|unknowntransaction|already/i.test(full);
+      if (!transient) throw err;
+      if (attempt === maxAttempts) throw err;
+      const delay = Math.min(500 * 2 ** (attempt - 1), 15000);
+      console.log(`  ⏳ ${label} connection dropped (attempt ${attempt}/${maxAttempts}); retrying in ${delay / 1000}s...`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+}
 
 // ─── Main ──────────────────────────────────────────────────────────────────────
 
@@ -152,7 +177,7 @@ async function main() {
       (payload) => walletCtx.unshieldedKeystore.signData(payload),
     );
     const finalized = await walletCtx.wallet.finalizeRecipe(recipe);
-    await walletCtx.wallet.submitTransaction(finalized);
+    await submitWithRetry(() => walletCtx.wallet.submitTransaction(finalized), 'DUST registration');
   }
 
   if (dustState.dust.balance(new Date()) === 0n) {

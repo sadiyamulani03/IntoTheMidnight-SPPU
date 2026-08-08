@@ -101,7 +101,7 @@ export async function submitCircuit(
  */
 async function buildBrowserContract() {
   const compiled = await import(
-    /* @vite-ignore */ '../../../contracts/managed/supply-chain/contract/index.js'
+    /* @vite-ignore */ '../contracts/contract/index.js'
   );
   const { CompiledContract } = await import('@midnight-ntwrk/midnight-js-protocol/compact-js');
 

@@ -135,7 +135,7 @@ let ledgerModule: LedgerDecoder | undefined;
  * has not been compiled yet.
  */
 async function getLedgerModule() {
-  const loaded = ledgerModule ?? (await import('../../contracts/managed/supply-chain/contract/index.js'));
+  const loaded = ledgerModule ?? (await import('./contracts/contract/index.js'));
   ledgerModule = loaded;
   return loaded;
 }

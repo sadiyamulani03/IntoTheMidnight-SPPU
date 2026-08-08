@@ -36,10 +36,16 @@ verify the *proof*; businesses keep their *secrets*.
   **Preview** for the public path
 - **Deployed contract ID (devnet):**
   `79c95c38c36c23a4c7bba815ee8ee4c6e7c242dbccce73f2749176481cc331c8`
-- **Preview:** `[PENDING — requires a funded Midnight Wallet. Run:
-  npm run deploy -- --network preview]` (fund the deployer address at the
-  Preview faucet, then the frontend connects to the contract via
-  `VITE_CONTRACT_ADDRESS`).
+- **Deployed contract ID (Preview):**
+  `4c55c8b1e47ec8f46be5905d970f238b3d2881ffb1d76104f672b2cb1e458f72`
+  (deployed from `mn_addr_preview1md72t23x5c2wxekztp5g9vxm36wung3x7y8pn2dsrw7r9gl0g6hssevm36`, August 8 2026)
+- **Live dashboard (Vercel):** https://chainshield-supply-chain.vercel.app
+  — reads the public claims of the Preview contract straight from the
+  Midnight indexer (Vite env: `VITE_NETWORK=preview`,
+  `VITE_INDEXER_URL=https://indexer.preview.midnight.network`,
+  `VITE_CONTRACT_ADDRESS=4c55c8b1e47ec8f46be5905d970f238b3d2881ffb1d76104f672b2cb1e458f72`).
+  The hosted build is read-only (`VITE_ENABLE_PROVE=false`); the *Prove & publish*
+  ZK panel runs locally via the relay / wallet extension.
 
 ### What an on-chain observer sees
 
@@ -186,6 +192,19 @@ npm run deploy -- --network preview
 # fund the printed wallet address at the Preview faucet, wait for tNIGHT,
 # then re-run. The contract ID is recorded in .midnight-state.json and can be
 # copied into frontend/.env.local as VITE_CONTRACT_ADDRESS.
+```
+
+**Hosting the dashboard (Vercel/Netlify):**
+
+The frontend is self-contained — it bundles the compiled contract
+(`frontend/src/contracts/`) and its ZK assets (`frontend/public/managed/`) so a
+static host never needs the Compact toolchain or Midnight node. `frontend/.env.production`
+carries the live Preview config. Deploy the `frontend/` directory (`vercel.json`
+and `netlify.toml` are both included):
+
+```bash
+npx vercel --prod --cwd frontend
+npm run frontend:build        # equivalent production build, baked via Vite
 ```
 
 **Wallet integration (Preview dashboard):** install the Midnight Wallet browser
