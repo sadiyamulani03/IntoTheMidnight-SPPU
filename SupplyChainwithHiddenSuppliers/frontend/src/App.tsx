@@ -97,9 +97,9 @@ export default function App() {
   const netConfig = getConfig();
   const wallet = useMidnight();
   const autoDemo = netConfig.demoMode && !netConfig.contractAddress;
-  // Runtime toggle overrides the env default, so the seeded coffee ledger is
-  // reachable even from the hosted build (no VITE_DEMO_MODE needed).
-  const [demoOverride, setDemoOverride] = useState<boolean | null>(null);
+  // Demo is the default view: the seeded coffee ledger IS the certification
+  // ledger until the user switches to Live (real chain).
+  const [demoOverride, setDemoOverride] = useState<boolean | null>(true);
   const demoMode = demoOverride ?? autoDemo;
 
   const [load, setLoad] = useState<LoadState>({ status: 'loading' });
