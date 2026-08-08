@@ -238,7 +238,3 @@ tests/                             Vitest suite incl. privacy (never-exposed) te
 frontend/                          React + Vite dashboard (DApp Connector + indexer reads)
 compose.yml                        Local Midnight devnet stack
 ```
-
-## License
-
-MIT
