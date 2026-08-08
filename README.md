@@ -11,6 +11,11 @@ and logistics routes never leave the company**.
 > (**MANUFACTURED → IN_TRANSIT → DELIVERED**) — while the supplier records behind
 > those claims stay private.
 
+## 🔗 Live Demo
+
+- **Live dashboard:** https://chainshield-supply-chain.vercel.app
+- **Contract (Midnight Preview):** `4c55c8b1e47ec8f46be5905d970f238b3d2881ffb1d76104f672b2cb1e458f72`
+
 ## Project Vision
 
 Traditional supply chains demand proof — that products are ethically sourced,
