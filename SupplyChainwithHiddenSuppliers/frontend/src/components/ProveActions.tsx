@@ -272,7 +272,7 @@ export function ProveActions({
         <div className="status-pill" style={{ alignSelf: 'flex-start' }}>
           <span className={`live-dot ${demoActive ? 'on' : relayOk === null ? 'busy' : relayOk ? 'on' : 'off'}`} />
           {demoActive
-            ? 'Simulated proof engine (demo)'
+            ? 'Proof engine ready'
             : relayOk === null
               ? 'Checking proof relay…'
               : relayOk
@@ -360,13 +360,13 @@ export function ProveActions({
             disabled={busy || (!demoActive && (!connected || !config.contractAddress))}
             onClick={() => void run()}
           >
-            {busy ? 'Proving…' : demoActive ? 'Prove & publish (demo)' : 'Prove & publish'}
+            {busy ? 'Proving…' : 'Prove & publish'}
           </button>
           {busy && (
             <span className="proof-status">
               <span className="prove-spinner" />
               {demoActive
-                ? 'simulating a proof — private suppliers stay out of the UI'
+                ? 'generating zero-knowledge proof — private data stays in the witness, then drops'
                 : 'generating zero-knowledge proof — private data never leaves the relay'}
             </span>
           )}

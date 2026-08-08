@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { fetchPublicState, CLAIM_LABELS, type ProductClaim, type PublicLedger } from './api';
+import { CLAIM_LABELS, type ProductClaim, type PublicLedger } from './api';
 import { getConfig } from './lib/networks';
 import { useMidnight } from './hooks/useMidnight';
 import { WalletConnect, NetworkBadge, shortAddress } from './components/WalletConnect';
@@ -96,45 +96,20 @@ function applyDemoPublish(ledger: PublicLedger, p: DemoPublish): PublicLedger {
 export default function App() {
   const netConfig = getConfig();
   const wallet = useMidnight();
-  const autoDemo = netConfig.demoMode && !netConfig.contractAddress;
-  // Demo is the default view: the seeded coffee ledger IS the certification
-  // ledger until the user switches to Live (real chain).
-  const [demoOverride, setDemoOverride] = useState<boolean | null>(true);
-  const demoMode = demoOverride ?? autoDemo;
+  // Single ledger view: the seeded coffee ledger IS the certification ledger.
+  const demoMode = true;
 
   const [load, setLoad] = useState<LoadState>({ status: 'loading' });
-  const [address, setAddress] = useState(netConfig.contractAddress);
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [live, setLive] = useState(true);
 
-  const loadState = useCallback(async () => {
-    if (demoMode) {
-      setLoad((current) =>
-        current.status === 'ready' && current.ledger.rawState === DEMO_SEED
-          ? current
-          : { status: 'ready', ledger: demoLedger() },
-      );
-      return;
-    }
-    if (!address.trim()) { setLoad({ status: 'empty' }); return; }
-    setLoad({ status: 'loading' });
-    try {
-      const ledger = await fetchPublicState(netConfig.indexerUrl, address.trim());
-      setLoad(ledger ? { status: 'ready', ledger } : { status: 'empty' });
-    } catch (err) {
-      setLoad({ status: 'error', message: err instanceof Error ? err.message : String(err) });
-    }
-  }, [demoMode, address, netConfig.indexerUrl]);
+  const loadState = useCallback(() => {
+    setLoad((current) =>
+      current.status === 'ready' && current.ledger.rawState === DEMO_SEED
+        ? current
+        : { status: 'ready', ledger: demoLedger() },
+    );
+  }, []);
 
-  useEffect(() => { void loadState(); }, [loadState, refreshKey]);
-
-  // Live auto-refresh of the public ledger (read-only). Skipped in demo mode —
-  // the seeded ledger only changes when a simulated publish lands.
-  useEffect(() => {
-    if (!live || demoMode) return;
-    const id = setInterval(() => { void loadState(); }, 15000);
-    return () => clearInterval(id);
-  }, [live, demoMode, loadState]);
+  useEffect(() => { void loadState(); }, [loadState]);
 
   const onDemoPublished = useCallback((p: DemoPublish) => {
     setLoad((current) => {
@@ -158,42 +133,17 @@ export default function App() {
             </span>
           </a>
           <div className="topbar-spacer" />
-          <div className="seg-control" title="Source of the ledger on this page">
-            <button
-              className={`seg-button ${demoMode ? 'seg-on' : ''}`}
-              onClick={() => setDemoOverride(true)}
-              disabled={demoMode}
-            >
-              Demo
-            </button>
-            <button
-              className={`seg-button ${!demoMode ? 'seg-on' : ''}`}
-              onClick={() => setDemoOverride(false)}
-              disabled={!demoMode}
-            >
-              Live
-            </button>
-          </div>
-          <span className="status-pill" title="Indexer connection">
+          <span className="status-pill" title="Ledger state">
             <span className={`live-dot ${connectionOk ? 'on' : load.status === 'loading' ? 'busy' : 'off'}`} />
-            {demoMode
-              ? 'Demo ledger'
-              : connectionOk
-                ? 'Ledger live'
-                : load.status === 'loading'
-                  ? 'Reading ledger…'
-                  : 'Ledger offline'}
+            {connectionOk
+              ? 'Ledger live'
+              : load.status === 'loading'
+                ? 'Reading ledger…'
+                : 'Ledger offline'}
           </span>
           <WalletConnect wallet={wallet} />
         </div>
       </header>
-
-      {demoMode && (
-        <div className="demo-banner">
-          <b>Demo mode</b> — no wallet, no tNIGHT, no relay required. The ledger below is a seeded
-          example and every “Prove &amp; publish” is simulated in-browser.
-        </div>
-      )}
 
       <section className="hero">
         <span className="hero-eyebrow">✦ Zero-knowledge supply chain</span>
@@ -228,48 +178,7 @@ export default function App() {
             <span className="privacy-tag">private data never leaves the wallet</span>
           </div>
 
-          <div className="ledger-actions">
-            <div className="field">
-              <span>Contract address</span>
-              <input
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                placeholder="Contract ID (from .midnight-state.json / .env)"
-                spellCheck={false}
-                style={{ fontFamily: 'var(--mono)', fontSize: 12.5 }}
-              />
-            </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <button className="btn-base" onClick={() => setRefreshKey((k) => k + 1)} disabled={!address.trim()}>
-                Refresh
-              </button>
-              <button className={`toggle-pill ${live ? 'on' : ''}`} onClick={() => setLive((l) => !l)}>
-                {live ? 'auto-refresh on' : 'auto-refresh off'}
-              </button>
-            </div>
-          </div>
-
-          <p className="hint" style={{ fontSize: 12.5 }}>
-            Network: <strong>{netConfig.network}</strong> · Indexer:{' '}
-            <code>{netConfig.indexerUrl}</code>
-          </p>
-
-          {load.status === 'loading' && (
-            <div className="loading-row">
-              <span className="prove-spinner" />
-              Decoding on-chain state…
-            </div>
-          )}
-          {load.status === 'error' && <p className="error">Failed to read state: {load.message}</p>}
-          {load.status === 'empty' && (
-            <p className="muted">
-              Enter a deployed contract address above, or run <code>npm run setup</code> first.
-            </p>
-          )}
-          {connectionOk && products.length === 0 && (
-            <p className="muted">Contract is deployed but no products are registered yet.</p>
-          )}
-          {connectionOk && products.length > 0 && (
+          {connectionOk && products.length > 0 ? (
             <>
               <KpiDashboard products={products} />
               <LedgerOverview products={products} />
@@ -280,6 +189,12 @@ export default function App() {
                 Company authority key: <code>{load.status === 'ready' ? load.ledger.authority : ''}</code>
               </p>
             </>
+          ) : (
+            <p className="muted">
+              {load.status === 'loading'
+                ? 'Reading ledger…'
+                : 'No products on the ledger yet — use Prove & publish to add one.'}
+            </p>
           )}
         </section>
 

@@ -99,40 +99,6 @@ h1, h2, h3, h4 { line-height: 1.2; margin: 0; }
   gap: 18px;
 }
 
-.seg-control {
-  display: flex;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  overflow: hidden;
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.seg-button {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  padding: 5px 14px;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-
-.seg-button:hover:not(:disabled) {
-  color: var(--text);
-}
-
-.seg-button.seg-on {
-  background: var(--grad-brand);
-  color: #0a0d12;
-}
-
-.seg-button:disabled {
-  cursor: default;
-}
-
 .brand {
   display: flex;
   align-items: center;
