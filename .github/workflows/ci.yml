@@ -38,10 +38,9 @@ jobs:
       - name: Setup Compact compiler
         uses: midnightntwrk/setup-compact-action@v1
         with:
-          compact-version: '0.5.1'
-
-      - name: Pin Compact toolchain (matches local dev)
-        run: compact update 0.31.1
+          # Toolchain version (compact compile --version == 0.31.1 locally);
+          # the action installs the latest devtool then runs `compact update`.
+          compact-version: '0.31.1'
 
       - name: Install dependencies
         run: npm ci
