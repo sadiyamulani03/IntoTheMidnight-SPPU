@@ -10,6 +10,9 @@ const workspaceRoot = resolve(__dirname, '..');
 
 export default defineConfig({
   plugins: [react(), wasm(), topLevelAwait()],
+  // GitHub Pages hosts project sites under /<repo>/; override via VITE_BASE
+  // (default '/' for local dev / Vercel).
+  base: process.env.VITE_BASE ?? '/',
   server: {
     fs: {
       allow: [workspaceRoot],

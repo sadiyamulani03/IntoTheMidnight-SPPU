@@ -1,0 +1,72 @@
+# Deploy the Supply Chain with Hidden Suppliers dashboard to GitHub Pages.
+#
+# The dashboard is the hosted, interactive demo: a seeded certification
+# ledger with an in-browser (simulated) ZK prove flow, so anyone can click
+# through the product with no wallet and no devnet. The production build
+# also carries the live Preview-network contract config
+# (SUPPLY_CHAIN_PREVIEW_ADDRESS / SUPPLY_CHAIN_INDEXER_URL) so a future
+# indexer-backed view can read the deployed contract's public claims.
+name: Deploy dashboard to GitHub Pages
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'SupplyChainwithHiddenSuppliers/frontend/**'
+      - '.github/workflows/deploy-dashboard.yml'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: SupplyChainwithHiddenSuppliers/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: SupplyChainwithHiddenSuppliers/frontend
+
+      - name: Build dashboard
+        working-directory: SupplyChainwithHiddenSuppliers/frontend
+        env:
+          VITE_BASE: '/IntoTheMidnight-SPPU/'
+          VITE_NETWORK: preview
+          # These override the values baked into frontend/.env.production.
+          # Override via repo variables without touching the workflow:
+          #   SUPPLY_CHAIN_PREVIEW_ADDRESS (contract address)
+          #   SUPPLY_CHAIN_INDEXER_URL (public indexer GraphQL endpoint)
+          VITE_INDEXER_URL: ${{ vars.SUPPLY_CHAIN_INDEXER_URL || 'https://indexer.preview.midnight.network/api/v4/graphql' }}
+          VITE_CONTRACT_ADDRESS: ${{ vars.SUPPLY_CHAIN_PREVIEW_ADDRESS || '4c55c8b1e47ec8f46be5905d970f238b3d2881ffb1d76104f672b2cb1e458f72' }}
+        run: npm run build
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: SupplyChainwithHiddenSuppliers/frontend/dist
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

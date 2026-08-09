@@ -1,0 +1,72 @@
+# CI for Supply Chain with Hidden Suppliers.
+#
+# On every push to main and every pull request: compile the Compact contract,
+# typecheck the TypeScript, run the offline test suites (backend + frontend),
+# and verify the dashboard builds. The on-chain e2e check is intentionally not
+# part of CI — it needs a live devnet/proof server.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'SupplyChainwithHiddenSuppliers/**'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    paths:
+      - 'SupplyChainwithHiddenSuppliers/**'
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: SupplyChainwithHiddenSuppliers/package-lock.json
+
+      - name: Setup Compact compiler
+        uses: midnightntwrk/setup-compact-action@v1
+        with:
+          compact-version: '0.5.1'
+
+      - name: Pin Compact toolchain (matches local dev)
+        run: compact update 0.31.1
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: SupplyChainwithHiddenSuppliers
+
+      - name: Compile Compact contract
+        run: npm run compile
+        working-directory: SupplyChainwithHiddenSuppliers
+
+      - name: Typecheck
+        run: npm run build
+        working-directory: SupplyChainwithHiddenSuppliers
+
+      - name: Backend tests
+        run: npm test
+        working-directory: SupplyChainwithHiddenSuppliers
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: SupplyChainwithHiddenSuppliers/frontend
+
+      - name: Frontend tests
+        run: npm test
+        working-directory: SupplyChainwithHiddenSuppliers/frontend
+
+      - name: Frontend build
+        run: npm run build
+        working-directory: SupplyChainwithHiddenSuppliers/frontend

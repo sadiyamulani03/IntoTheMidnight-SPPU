@@ -11,6 +11,9 @@ and logistics routes never leave the company**.
 > (**MANUFACTURED → IN_TRANSIT → DELIVERED**) — while the supplier records behind
 > those claims stay private.
 
+[![CI](https://github.com/sadiyamulani03/IntoTheMidnight-SPPU/actions/workflows/ci.yml/badge.svg)](https://github.com/sadiyamulani03/IntoTheMidnight-SPPU/actions/workflows/ci.yml)
+[![Dashboard](https://github.com/sadiyamulani03/IntoTheMidnight-SPPU/actions/workflows/deploy-dashboard.yml/badge.svg)](https://github.com/sadiyamulani03/IntoTheMidnight-SPPU/actions/workflows/deploy-dashboard.yml)
+
 ## 🔗 Live Demo
 
 - **Live dashboard:** https://chainshield-supply-chain.vercel.app
@@ -302,6 +305,24 @@ that single call site — everything else is wired.
   server is up (`docker compose ps`).
 - **RPC disconnection logs during sync** — expected on devnet restarts; ignored.
 
+## CI / CD
+
+Two GitHub Actions workflows keep this repo green and ship the live demo:
+
+- **`.github/workflows/ci.yml`** — on every push to `main` and every pull
+  request touching `SupplyChainwithHiddenSuppliers/**`: installs the Compact
+  toolchain (pinned to the same `0.31.1` / `0.5.1` used locally), compiles the
+  contract, typechecks, runs the backend test suite, then builds and tests the
+  frontend. On-chain e2e is deliberately excluded from CI — it needs a live
+  devnet — but runs locally via `npm run test:e2e`.
+- **`.github/workflows/deploy-dashboard.yml`** — rebuilds the dashboard and
+  publishes it to **GitHub Pages** on `main` (or manually). The hosted page is
+  the same interactive demo as the Vercel link: a seeded certification ledger
+  with an in-browser *Prove & publish* flow, zero wallet/faucet needed. The
+  build also carries the live Preview contract config (repo variables
+  `SUPPLY_CHAIN_PREVIEW_ADDRESS` / `SUPPLY_CHAIN_INDEXER_URL`) so an
+  indexer-backed view can read the deployed contract's public claims.
+
 ## Project structure
 
 ```
@@ -318,6 +339,7 @@ docs/                              Architecture · Tier 2 draft · eval sheet ·
 
 | Doc                                              | Use when                               |
 | ------------------------------------------------ | -------------------------------------- |
+| `SupplyChainwithHiddenSuppliers/docs/PRODUCT_PROPOSAL.md`       | Level 3 product proposal (Confidential Credentials) |
 | `SupplyChainwithHiddenSuppliers/docs/architecture.md`          | Mermaid diagrams + threat boundary       |
 | `SupplyChainwithHiddenSuppliers/docs/eval-sheet.md`            | 60-second demo walkthrough for judges    |
 | `SupplyChainwithHiddenSuppliers/docs/demo-video-storyboard.md` | Recording the demo video                 |
