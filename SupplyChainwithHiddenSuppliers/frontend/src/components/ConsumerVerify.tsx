@@ -19,15 +19,11 @@ export function ConsumerVerify({ products }: { products: ProductClaim[] }) {
   return (
     <div className="panel">
       <div className="panel-head">
-        <h2>
-          <span className="panel-kicker">QR flow</span>
-          Consumer verification
-        </h2>
-        <span className="privacy-tag">Proved without revealing your input</span>
+        <h2>Check a product, like scanning a QR</h2>
       </div>
       <p className="muted">
-        A consumer scans the pack QR and sees <em>only</em> these proven statements — never the
-        supplier identities, prices or routes behind them.
+        Punch in a product ID and see exactly what a shopper scanning the pack would get — only the
+        verified statements, never the suppliers, prices or routes behind them.
       </p>
       <div className="verify-search">
         <input

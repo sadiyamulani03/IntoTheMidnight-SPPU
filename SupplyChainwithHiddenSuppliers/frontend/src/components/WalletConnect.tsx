@@ -51,7 +51,7 @@ export function WalletConnect({ wallet }: { wallet: UseMidnightReturn }) {
 
       {state.status === 'error' && state.message && <p className="error">{state.message}</p>}
       {state.status === 'disconnected' && (
-        <p className="wallet-status-text">Wallet disconnected. Reconnect to publish Zero-Knowledge claims.</p>
+        <p className="wallet-status-text">Wallet disconnected — reconnect to publish claims.</p>
       )}
     </div>
   );

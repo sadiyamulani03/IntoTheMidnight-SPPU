@@ -136,7 +136,7 @@ export default function App() {
           <span className="status-pill" title="Ledger state">
             <span className={`live-dot ${connectionOk ? 'on' : load.status === 'loading' ? 'busy' : 'off'}`} />
             {connectionOk
-              ? 'Ledger live'
+              ? 'Demo ledger'
               : load.status === 'loading'
                 ? 'Reading ledger…'
                 : 'Ledger offline'}
@@ -145,16 +145,23 @@ export default function App() {
         </div>
       </header>
 
+      <div className="demo-banner">
+        <span>
+          This is a <b>demo ledger</b> — the products below are seeded and the prove flow is
+          simulated in the browser. The same contract runs live on Midnight's preview network.
+        </span>
+      </div>
+
       <section className="hero">
-        <span className="hero-eyebrow">✦ Zero-knowledge supply chain</span>
+        <span className="hero-eyebrow">A Midnight demo</span>
         <h1>
-          Ethical sourcing, <span className="grad">proven blind.</span>
+          Ethical on the record. <span className="grad">Suppliers off it.</span>
         </h1>
         <p className="hero-sub">
-          Every product below carries <strong>zero-knowledge proven</strong> claims — every supplier
-          certified, ethically sourced, fair-trade priced — across a verifiable{' '}
-          <strong>MANUFACTURED → IN_TRANSIT → DELIVERED</strong> lifecycle. The underlying supplier
-          identities, certificates, prices and routes <strong>never leave a wallet</strong>.
+          For this demo the products are single-origin coffee shipments. Each one carries four
+          claims — certified suppliers, ethical sourcing, compliant routes, fair pricing — plus
+          where it sits in the lifecycle. You can check every claim. The supplier names,
+          certificates, prices and routes behind them are <strong>proved, not published</strong>.
         </p>
         <div className="hero-cta">
           <span className="chip"><b>{products.length}</b> product{(products.length === 1 ? '' : 's')} on ledger</span>
@@ -171,23 +178,16 @@ export default function App() {
 
         <section className="panel">
           <div className="panel-head">
-            <h2>
-              <span className="panel-kicker">Public certification ledger</span>
-              Readable by anyone
-            </h2>
-            <span className="privacy-tag">private data never leaves the wallet</span>
+            <h2>Products on the ledger</h2>
+            <span className="privacy-tag">claims public · records private</span>
           </div>
 
           {connectionOk && products.length > 0 ? (
             <>
-              <KpiDashboard products={products} />
               <LedgerOverview products={products} />
               <div className="products">
                 {products.map((p) => <ProductRow key={p.productId} product={p} showTimeline={demoMode} />)}
               </div>
-              <p className="hint" style={{ marginTop: 16, fontSize: 12.5 }}>
-                Company authority key: <code>{load.status === 'ready' ? load.ledger.authority : ''}</code>
-              </p>
             </>
           ) : (
             <p className="muted">
@@ -204,51 +204,13 @@ export default function App() {
       </main>
 
       <footer className="footer">
-        <div className="foot-mark">✦ ChainShield</div>
+        <div className="foot-mark">ChainShield</div>
         <div>
-          <b>Supply Chain with Hidden Suppliers</b> — a Midnight Network ZK dApp. Public claims and
-          counts are on-chain; identities, certifications, prices and routes exist only inside proofs.
+          A Midnight ZK dApp. The claims live on the ledger; the supplier data behind them lives
+          only inside proofs.
         </div>
       </footer>
     </>
-  );
-}
-
-/* ---------------------------------------------------------------------------
-   KPI dashboard
---------------------------------------------------------------------------- */
-function KpiDashboard({ products }: { products: ProductClaim[] }) {
-  const total = products.length;
-  const delivered = products.filter((p) => p.stage >= 3).length;
-  const inTransit = products.filter((p) => p.stage === 2).length;
-  const avg = total === 0 ? 0 : Math.round(products.reduce((s, p) => s + p.complianceScore, 0) / total);
-  const certified = products.filter((p) => p.allCertified).length;
-  const fair = products.filter((p) => p.fairPricing).length;
-  const fully = products.filter((p) => p.complianceScore >= 100).length;
-
-  return (
-    <div className="kpis">
-      <div className="kpi brand-tone">
-        <div className="kpi-value">{total}</div>
-        <div className="kpi-label">Products on ledger</div>
-        <div className="kpi-sub">{delivered} delivered · {inTransit} in transit</div>
-      </div>
-      <div className="kpi ok-tone">
-        <div className="kpi-value">{certified}/{total}</div>
-        <div className="kpi-label">All suppliers certified</div>
-        <div className="mini-bar"><i style={{ width: `${total ? (certified / total) * 100 : 0}%` }} /></div>
-      </div>
-      <div className="kpi warn-tone">
-        <div className="kpi-value">{fair}/{total}</div>
-        <div className="kpi-label">Fair-pricing proven</div>
-        <div className="mini-bar"><i style={{ width: `${total ? (fair / total) * 100 : 0}%` }} /></div>
-      </div>
-      <div className="kpi">
-        <div className="kpi-value">{fully}<span style={{ fontSize: 16, color: 'var(--muted)' }}>/{total}</span></div>
-        <div className="kpi-label">100% compliant</div>
-        <div className="kpi-sub">avg compliance score {avg}</div>
-      </div>
-    </div>
   );
 }
 
@@ -266,7 +228,6 @@ function ProductRow({ product, showTimeline = false }: { product: ProductClaim; 
     <div className={`product-card ${open ? 'open' : ''}`}>
       <button className="product-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
         <span className="product-id">{product.productId}</span>
-        <span className="brand-mark" style={{ width: 26, height: 26, fontSize: 14 }}>✦</span>
         <span className="product-top-meta">
           <span className="badge badge-stage">{STAGE_SHORT[product.stage]}</span>
           <span className="muted">{product.auditCount} re-audit{product.auditCount === 1 ? '' : 's'}</span>
@@ -278,7 +239,7 @@ function ProductRow({ product, showTimeline = false }: { product: ProductClaim; 
           <div className="quick-stats">
             <div className="quick-stat"><div className="q-num">{product.complianceScore}/100</div><div className="q-label">Compliance</div></div>
             <div className="quick-stat"><div className="q-num">{product.quantity.toString()}</div><div className="q-label">Units</div></div>
-            <div className="quick-stat"><div className="q-num">{product.certifiedCount}</div><div className="q-label">Certified / 8</div></div>
+            <div className="quick-stat"><div className="q-num">{product.certifiedCount}</div><div className="q-label">Certified suppliers</div></div>
           </div>
           <StageBar stage={product.stage} />
           <ScoreBar score={product.complianceScore} />
@@ -310,8 +271,8 @@ function ProductRow({ product, showTimeline = false }: { product: ProductClaim; 
               <p className="claim-reveal">
                 <span className="live-dot on" />
                 <span>
-                  Supplier identities, certificate numbers, prices paid and transport routes are
-                  hidden — proved in zero-knowledge, never published.
+                  Supplier names, certificate numbers, prices and routes — proved in
+                  zero-knowledge, never published.
                 </span>
               </p>
             </>
@@ -379,14 +340,10 @@ function PrivacyExplainer() {
     <section className="panel">
       <div className="panel-head">
         <h2>
-          <span className="panel-kicker">Selective disclosure</span>
-          How privacy works
+          <span className="panel-kicker">How it works</span>
+          The chain sees the claim, never the paperwork
         </h2>
-        <span className="privacy-tag">ZK proof, not data</span>
       </div>
-      <p>
-        Instead of revealing the fact, ChainShield publishes a <strong>proof of the fact</strong>.
-      </p>
       <ul className="zk-examples">
         <li>
           <span className="reveal">Supplier: ABC Cotton Ltd · Maharashtra · cert A-2214</span>
@@ -407,41 +364,37 @@ function PrivacyExplainer() {
 
       <div className="privacy-flow">
         <div className="privacy-step">
-          <div className="step-num">STEP 01</div>
-          <h3>Witness in the wallet</h3>
+          <div className="step-num">1</div>
+          <h3>Keep it in the wallet</h3>
           <p>
-            Supplier identities, certs, expiries, prices and routes live only inside the wallet /
-            relay, generated at proof time.
+            Supplier names, certs, prices and routes are assembled at proof time — inside the
+            wallet or relay — and never stored anywhere else.
           </p>
         </div>
         <div className="privacy-step">
-          <div className="step-num">STEP 02</div>
-          <h3>Zero-knowledge proof</h3>
+          <div className="step-num">2</div>
+          <h3>Prove, don't show</h3>
           <p>
-            A circuit proves a property — "all 26 suppliers are certified" — without revealing who
+            A circuit checks a property — "all 26 suppliers are certified" — without naming who
             they are or what they were paid.
           </p>
         </div>
         <div className="privacy-step">
-          <div className="step-num">STEP 03</div>
-          <h3>Claim only on chain</h3>
+          <div className="step-num">3</div>
+          <h3>Publish only the claim</h3>
           <p>
-            Booleans, the certified count and a committed floor cross the boundary — and can be
-            verified by anyone.
+            The booleans, the certified count and a committed floor go on chain, where anyone can
+            verify them.
           </p>
         </div>
       </div>
 
       <div className="boundary-box">
-        <strong>Only these cross the proof boundary:</strong>
+        <strong>What's actually on chain:</strong>
         <ul>
           <li>Claim booleans, the <code>certifiedCount</code> aggregate, the committed <code>fairFloor</code></li>
           <li>Lifecycle stage, <code>auditCount</code>, derived compliance score</li>
         </ul>
-        <p className="muted" style={{ margin: '10px 0 0', fontSize: 13 }}>
-          Supplier identities, certificate numbers + expiries, prices paid and routes never leave the
-          wallet — generated at proof time, used for the proof, and dropped.
-        </p>
       </div>
     </section>
   );

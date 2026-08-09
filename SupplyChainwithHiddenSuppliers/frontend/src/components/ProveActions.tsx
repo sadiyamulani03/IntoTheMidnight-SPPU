@@ -12,8 +12,6 @@
  *   + the three claim booleans (certified / ethical / routes).
  * The private "price paid to suppliers" is a demo witness value auto-filled and
  * dropped inside the proof — it never reaches a UI field, log or store.
- *
- * Every submit is labelled: "Proved without revealing your input."
  */
 import { useEffect, useState } from 'react';
 import type { UseMidnightReturn } from '../hooks/useMidnight';
@@ -44,12 +42,12 @@ export interface DemoPublish {
 }
 
 const CIRCUITS: { kind: Wire; label: string; desc: string; ownerOnly?: boolean }[] = [
-  { kind: 'registerProduct', label: 'Register product', desc: 'MANUFACTURED — every supplier certified, ethical, routes compliant.' },
-  { kind: 'recertifyProduct', label: 'Re-certify', desc: 'Re-prove claims + no lapsed certs; bumps the on-chain audit.' },
-  { kind: 'proveFairPricing', label: 'Prove fair pricing', desc: 'Every price ≥ public floor — prices stay private.' },
+  { kind: 'registerProduct', label: 'Register product', desc: 'Adds the product at MANUFACTURED — suppliers certified, ethical, routes compliant.' },
+  { kind: 'recertifyProduct', label: 'Re-certify', desc: 'Re-checks claims, rejects lapsed certificates; bumps the audit counter.' },
+  { kind: 'proveFairPricing', label: 'Prove fair pricing', desc: 'Every price paid is above the public floor — prices stay private.' },
   { kind: 'shipProduct', label: 'Ship product', desc: 'MANUFACTURED → IN_TRANSIT.' },
   { kind: 'deliverProduct', label: 'Deliver product', desc: 'IN_TRANSIT → DELIVERED.' },
-  { kind: 'withdrawClaim', label: 'Withdraw claim', desc: 'Owner-only; removes a claim — ownership proven in ZK.', ownerOnly: true },
+  { kind: 'withdrawClaim', label: 'Withdraw claim', desc: 'Owner only — removes a claim, with the owner proven in ZK.', ownerOnly: true },
 ];
 
 const RELAY_CIRCUIT: Record<CircuitKind, RelayCircuit> = {
@@ -255,18 +253,14 @@ export function ProveActions({
   return (
     <div className="panel">
       <div className="panel-head">
-        <h2>
-          <span className="panel-kicker">Zero-knowledge</span>
-          Prove &amp; publish a claim
-        </h2>
-        <span className="privacy-tag">Proved without revealing your input</span>
+        <h2>Prove &amp; publish a claim</h2>
+        <span className="privacy-tag">publishes claims only</span>
       </div>
 
       <div className="prove-stack">
         <p className="muted">
-          Each action creates a <strong>zero-knowledge proof</strong> from the private supplier
-          list and publishes only the disclosed claim. Identities, certificates, prices and routes
-          are dropped the instant a proof is produced.
+          Each action builds a proof from the private supplier list and publishes just the claim.
+          The supplier data is thrown away the moment the proof is done.
         </p>
 
         <div className="status-pill" style={{ alignSelf: 'flex-start' }}>
@@ -337,7 +331,7 @@ export function ProveActions({
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <span className="muted" style={{ fontSize: 12.5 }}>
-            These claim booleans are published; the underlying supplier records stay private.
+            These claims go on the ledger. The supplier records behind them don't.
           </span>
           <div className="toggle-row">
             {CLAIM_TOGGLES.map((t) => (
@@ -366,8 +360,8 @@ export function ProveActions({
             <span className="proof-status">
               <span className="prove-spinner" />
               {demoActive
-                ? 'generating zero-knowledge proof — private data stays in the witness, then drops'
-                : 'generating zero-knowledge proof — private data never leaves the relay'}
+                ? 'building proof — the supplier data never leaves the page'
+                : 'building proof — the supplier data never leaves the relay'}
             </span>
           )}
           {!demoActive && !connected && !busy && (
@@ -381,7 +375,7 @@ export function ProveActions({
         {outcome?.ok === true && (
           <div className="outcome-box ok">
             <span>
-              <strong>Publish confirmed.</strong> Proved without revealing your input — claim is on-chain.
+              <strong>Published.</strong> Only the claim went on the ledger.
             </span>
             <span>
               Circuit <code>{outcome.circuit}</code> · Tx ID <code>{outcome.txId}</code> · block{' '}
@@ -392,10 +386,10 @@ export function ProveActions({
 
         {products.length > 0 && (
           <div className="prove-note">
-            <b>On-chain products:</b>{' '}
+            <b>On the ledger:</b>{' '}
             {products.slice(0, 6).map((p) => p.productId).join(', ')}
-            {products.length > 6 ? ` +${products.length - 6} more` : ''} — pick an ID above to link a
-            new proof to an existing record.
+            {products.length > 6 ? ` +${products.length - 6} more` : ''} — use one of these IDs if
+            you want to link a proof to an existing product.
           </div>
         )}
       </div>

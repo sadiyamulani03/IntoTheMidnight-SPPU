@@ -18,7 +18,7 @@ export function buildStatements(p: ProductClaim): VerifierStatement[] {
     {
       label: 'Certified suppliers only',
       ok: p.allCertified,
-      hint: `${p.certifiedCount}/8 suppliers certified — identities never revealed`,
+      hint: `${p.certifiedCount}/8 suppliers certified — who they are stays private`,
     },
     {
       label: 'Passed quality inspection',
@@ -35,8 +35,8 @@ export function VerifierStatements({ product }: { product: ProductClaim }) {
   return (
     <div className="verifier">
       <div className="verifier-head">
-        <span className="verifier-title">Zero-knowledge verified statements</span>
-        <span className="privacy-tag">Proved without revealing your input</span>
+        <span className="verifier-title">What's been verified</span>
+        <span className="privacy-tag">claims only</span>
       </div>
       <ul className="verifier-list">
         {stmts.map((s) => (
