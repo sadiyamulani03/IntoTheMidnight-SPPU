@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { CLAIM_LABELS, type ProductClaim, type PublicLedger } from './api';
+import { fetchPublicState, CLAIM_LABELS, type ProductClaim, type PublicLedger } from './api';
 import { getConfig } from './lib/networks';
 import { useMidnight } from './hooks/useMidnight';
 import { WalletConnect, NetworkBadge, shortAddress } from './components/WalletConnect';
@@ -96,20 +96,43 @@ function applyDemoPublish(ledger: PublicLedger, p: DemoPublish): PublicLedger {
 export default function App() {
   const netConfig = getConfig();
   const wallet = useMidnight();
-  // Single ledger view: the seeded coffee ledger IS the certification ledger.
-  const demoMode = true;
+  // When a deployed contract address is configured (Pages/Vercel builds), read
+  // the REAL ledger from the indexer. The seeded coffee ledger is only a
+  // fallback for local dev with no contract (VITE_DEMO_MODE, no address).
+  const demoMode = !!netConfig.demoMode && !netConfig.contractAddress;
+  const contractAddress = netConfig.contractAddress.trim();
 
   const [load, setLoad] = useState<LoadState>({ status: 'loading' });
 
-  const loadState = useCallback(() => {
-    setLoad((current) =>
-      current.status === 'ready' && current.ledger.rawState === DEMO_SEED
-        ? current
-        : { status: 'ready', ledger: demoLedger() },
-    );
-  }, []);
+  const loadState = useCallback(async () => {
+    if (demoMode) {
+      setLoad((current) =>
+        current.status === 'ready' && current.ledger.rawState === DEMO_SEED
+          ? current
+          : { status: 'ready', ledger: demoLedger() },
+      );
+      return;
+    }
+    if (!contractAddress) { setLoad({ status: 'empty' }); return; }
+    setLoad({ status: 'loading' });
+    try {
+      const ledger = await fetchPublicState(netConfig.indexerUrl, contractAddress);
+      setLoad(ledger ? { status: 'ready', ledger } : { status: 'empty' });
+    } catch (err) {
+      setLoad({ status: 'error', message: err instanceof Error ? err.message : String(err) });
+    }
+  }, [demoMode, contractAddress, netConfig.indexerUrl]);
 
   useEffect(() => { void loadState(); }, [loadState]);
+
+  // Live-ledger auto-refresh (read-only) so a new proof shows up without a
+  // manual reload. Demo mode is skipped — the seeded ledger only changes when a
+  // simulated publish lands.
+  useEffect(() => {
+    if (demoMode) return;
+    const id = setInterval(() => { void loadState(); }, 20_000);
+    return () => clearInterval(id);
+  }, [demoMode, loadState]);
 
   const onDemoPublished = useCallback((p: DemoPublish) => {
     setLoad((current) => {
@@ -135,33 +158,48 @@ export default function App() {
           <div className="topbar-spacer" />
           <span className="status-pill" title="Ledger state">
             <span className={`live-dot ${connectionOk ? 'on' : load.status === 'loading' ? 'busy' : 'off'}`} />
-            {connectionOk
+            {demoMode
               ? 'Demo ledger'
-              : load.status === 'loading'
-                ? 'Reading ledger…'
-                : 'Ledger offline'}
+              : connectionOk
+                ? 'Ledger live'
+                : load.status === 'loading'
+                  ? 'Reading ledger…'
+                  : 'Ledger offline'}
           </span>
           <WalletConnect wallet={wallet} />
         </div>
       </header>
 
-      <div className="demo-banner">
-        <span>
-          This is a <b>demo ledger</b> — the products below are seeded and the prove flow is
-          simulated in the browser. The same contract runs live on Midnight's preview network.
-        </span>
-      </div>
+      {demoMode && (
+        <div className="demo-banner">
+          <span>
+            This is a <b>demo ledger</b> — the products below are seeded and the prove flow is
+            simulated in the browser.
+          </span>
+        </div>
+      )}
 
       <section className="hero">
-        <span className="hero-eyebrow">A Midnight demo</span>
+        <span className="hero-eyebrow">{demoMode ? 'A Midnight demo' : 'Live on Midnight Preview'}</span>
         <h1>
           Ethical on the record. <span className="grad">Suppliers off it.</span>
         </h1>
         <p className="hero-sub">
-          For this demo the products are single-origin coffee shipments. Each one carries four
-          claims — certified suppliers, ethical sourcing, compliant routes, fair pricing — plus
-          where it sits in the lifecycle. You can check every claim. The supplier names,
-          certificates, prices and routes behind them are <strong>proved, not published</strong>.
+          {demoMode ? (
+            <>
+              For this demo the products are single-origin coffee shipments. Each one carries four
+              claims — certified suppliers, ethical sourcing, compliant routes, fair pricing —
+              plus where it sits in the lifecycle. You can check every claim. The supplier names,
+              certificates, prices and routes behind them are <strong>proved, not published</strong>.
+            </>
+          ) : (
+            <>
+              These are the products currently on the deployed contract. Each carries four claims —
+              certified suppliers, ethical sourcing, compliant routes, fair pricing — plus where it
+              sits in the lifecycle. Anyone can read them from the indexer. The supplier names,
+              certificates, prices and routes behind them are <strong>proved, not published</strong>.
+            </>
+          )}
         </p>
         <div className="hero-cta">
           <span className="chip"><b>{products.length}</b> product{(products.length === 1 ? '' : 's')} on ledger</span>
@@ -188,12 +226,21 @@ export default function App() {
               <div className="products">
                 {products.map((p) => <ProductRow key={p.productId} product={p} showTimeline={demoMode} />)}
               </div>
+              {!demoMode && (
+                <p className="hint" style={{ marginTop: 16, fontSize: 12.5, wordBreak: 'break-all' }}>
+                  Contract: <code>{contractAddress}</code> · {load.status === 'ready' ? `authority key ${load.ledger.authority.slice(0, 20)}…` : 'reading…'} · refreshes every 20s
+                </p>
+              )}
             </>
           ) : (
             <p className="muted">
               {load.status === 'loading'
                 ? 'Reading ledger…'
-                : 'No products on the ledger yet — use Prove & publish to add one.'}
+                : load.status === 'error'
+                  ? `Couldn't read the contract state: ${load.message}`
+                  : demoMode
+                    ? 'No products on the ledger yet — use Prove & publish to add one.'
+                    : 'This contract has no products yet.'}
             </p>
           )}
         </section>
