@@ -19,6 +19,10 @@ and logistics routes never leave the company**.
 - **Live dashboard (Vercel):** https://chainshield-supply-chain.vercel.app
 - **Live dashboard (GitHub Pages):** https://sadiyamulani03.github.io/IntoTheMidnight-SPPU/
 - **Contract (Midnight Preview):** `4c55c8b1e47ec8f46be5905d970f238b3d2881ffb1d76104f672b2cb1e458f72`
+  — currently holds three live demo products, one per lifecycle stage
+  (`DELIVERED` score 100, `IN_TRANSIT` score 100, `MANUFACTURED` score 80).
+  Anyone can query its public state straight from the
+  [Preview indexer](https://indexer.preview.midnight.network/api/v4/graphql).
 
 ## Project Vision
 
